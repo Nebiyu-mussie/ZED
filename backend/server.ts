@@ -6,6 +6,10 @@ import jwt from 'jsonwebtoken';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const JWT_SECRET = process.env.JWT_SECRET || 'zemen-express-secret-key';
 
