@@ -18,3 +18,8 @@ View your app in AI Studio: https://ai.studio/apps/a67332bb-e67a-4bed-863a-0295f
 2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
 3. Run the app:
    `npm run dev`
+
+## MongoDB Setup
+
+Set `MONGODB_URI` in `.env` (see `.env.example`). Default for local development:
+`mongodb://127.0.0.1:27017/zemen_express`

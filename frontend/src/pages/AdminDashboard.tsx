@@ -1,36 +1,57 @@
-import React, { useState, useEffect } from 'react';
-import { Users, Truck, Package, CheckCircle, XCircle, BarChart3, Map, Settings, Search, Filter, ShoppingBag, AlertTriangle } from 'lucide-react';
-import { format } from 'date-fns';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Users, Truck, Package, CheckCircle, XCircle, BarChart3, Map, Search, Filter, AlertTriangle } from 'lucide-react';
+import { formatShortDate, formatCurrency, apiFetch } from '../lib/api';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
+import { useToast } from '../components/ui/Toast';
+import { getSocket } from '../lib/socket';
 
-type TabType = 'overview' | 'orders' | 'drivers' | 'customers' | 'products' | 'reports' | 'operations';
+type TabType = 'overview' | 'orders' | 'drivers' | 'customers' | 'reports' | 'operations' | 'map';
 
 export default function AdminDashboard() {
   const [activeTab, setActiveTab] = useState<TabType>('overview');
-  const [deliveries, setDeliveries] = useState<any[]>([]);
+  const [orders, setOrders] = useState<any[]>([]);
   const [drivers, setDrivers] = useState<any[]>([]);
   const [users, setUsers] = useState<any[]>([]);
+  const [reports, setReports] = useState<any>({});
+  const [tickets, setTickets] = useState<any[]>([]);
+  const [promos, setPromos] = useState<any[]>([]);
+  const [pricingRules, setPricingRules] = useState<any[]>([]);
+  const [zones, setZones] = useState<any[]>([]);
+  const [auditLogs, setAuditLogs] = useState<any[]>([]);
+  const [searchResults, setSearchResults] = useState<any>({ orders: [], users: [] });
+  const [promoForm, setPromoForm] = useState({ code: '', discountType: 'flat', amount: 0, minSpend: 0, maxUses: 0, perUserLimit: 0 });
+  const [pricingForm, setPricingForm] = useState({ zoneName: '', serviceType: 'same_day', baseFare: 80, perKm: 12, weightRate: 6, surgeMultiplier: 1 });
+  const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
+  const toast = useToast();
   const navigate = useNavigate();
 
   const fetchData = async () => {
     try {
-      const token = localStorage.getItem('token');
-      const headers = { Authorization: `Bearer ${token}` };
-
-      const [delRes, drvRes, usrRes] = await Promise.all([
-        fetch('/api/deliveries', { headers }),
-        fetch('/api/drivers', { headers }),
-        fetch('/api/users', { headers }),
+      const [ordersRes, driversRes, usersRes, reportRes, ticketsRes, promosRes, pricingRes, zonesRes, auditRes] = await Promise.all([
+        apiFetch('/api/orders'),
+        apiFetch('/api/drivers'),
+        apiFetch('/api/users'),
+        apiFetch('/api/admin/reports'),
+        apiFetch('/api/admin/tickets'),
+        apiFetch('/api/admin/promos'),
+        apiFetch('/api/admin/pricing'),
+        apiFetch('/api/admin/zones'),
+        apiFetch('/api/admin/audit'),
       ]);
-
-      if (delRes.ok) setDeliveries(await delRes.json());
-      if (drvRes.ok) setDrivers(await drvRes.json());
-      if (usrRes.ok) setUsers(await usrRes.json());
+      setOrders(ordersRes);
+      setDrivers(driversRes);
+      setUsers(usersRes);
+      setReports(reportRes);
+      setTickets(ticketsRes || []);
+      setPromos(promosRes || []);
+      setPricingRules(pricingRes || []);
+      setZones(zonesRes || []);
+      setAuditLogs(auditRes || []);
     } catch (error) {
-      console.error('Failed to fetch admin data', error);
+      toast.push({ title: 'Failed to load admin data', variant: 'error' });
     } finally {
       setLoading(false);
     }
@@ -38,27 +59,129 @@ export default function AdminDashboard() {
 
   useEffect(() => {
     fetchData();
+    const socket = getSocket();
+    socket.on('order_updated', (order: any) => {
+      setOrders((prev) => {
+        const exists = prev.find((item) => item.id === order.id);
+        if (exists) return prev.map((item) => (item.id === order.id ? order : item));
+        return [order, ...prev];
+      });
+    });
+    socket.on('driver_location', (payload: any) => {
+      setDrivers((prev) => prev.map((d) => (d.user_id === payload.driverId ? { ...d, last_lat: payload.lat, last_lng: payload.lng } : d)));
+    });
+    return () => {
+      socket.off('order_updated');
+      socket.off('driver_location');
+    };
   }, []);
 
   const updateDriverStatus = async (id: number, status: string) => {
     try {
-      const res = await fetch(`/api/drivers/${id}/status`, {
+      await apiFetch(`/api/drivers/${id}/status`, {
         method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${localStorage.getItem('token')}`,
-        },
         body: JSON.stringify({ status }),
       });
-      if (res.ok) fetchData();
+      toast.push({ title: `Driver ${status}`, variant: 'success' });
+      fetchData();
     } catch (error) {
-      console.error('Failed to update driver status', error);
+      toast.push({ title: 'Could not update driver status', variant: 'error' });
     }
   };
 
+  const assignDriver = async (orderId: number, driverId: number) => {
+    try {
+      await apiFetch(`/api/orders/${orderId}/assign`, {
+        method: 'POST',
+        body: JSON.stringify({ driverId }),
+      });
+      toast.push({ title: 'Driver assigned', variant: 'success' });
+      fetchData();
+    } catch (error: any) {
+      toast.push({ title: 'Assignment failed', description: error.error || '', variant: 'error' });
+    }
+  };
+
+  const updateTicketStatus = async (ticketId: number, status: string) => {
+    try {
+      await apiFetch(`/api/admin/tickets/${ticketId}/status`, {
+        method: 'PUT',
+        body: JSON.stringify({ status }),
+      });
+      toast.push({ title: 'Ticket updated', variant: 'success' });
+      fetchData();
+    } catch (error) {
+      toast.push({ title: 'Unable to update ticket', variant: 'error' });
+    }
+  };
+
+  const togglePromo = async (promoId: number, active: boolean) => {
+    try {
+      await apiFetch(`/api/admin/promos/${promoId}`, {
+        method: 'PUT',
+        body: JSON.stringify({ active }),
+      });
+      fetchData();
+    } catch (error) {
+      toast.push({ title: 'Unable to update promo', variant: 'error' });
+    }
+  };
+
+  const createPromo = async () => {
+    try {
+      await apiFetch('/api/admin/promos', {
+        method: 'POST',
+        body: JSON.stringify(promoForm),
+      });
+      setPromoForm({ code: '', discountType: 'flat', amount: 0, minSpend: 0, maxUses: 0, perUserLimit: 0 });
+      fetchData();
+    } catch (error) {
+      toast.push({ title: 'Unable to create promo', variant: 'error' });
+    }
+  };
+
+  const createPricingRule = async () => {
+    try {
+      await apiFetch('/api/admin/pricing', {
+        method: 'POST',
+        body: JSON.stringify(pricingForm),
+      });
+      fetchData();
+    } catch (error) {
+      toast.push({ title: 'Unable to create pricing rule', variant: 'error' });
+    }
+  };
+
+  const updateZoneStatus = async (zoneId: number, status: string) => {
+    try {
+      await apiFetch(`/api/admin/zones/${zoneId}`, {
+        method: 'PUT',
+        body: JSON.stringify({ status }),
+      });
+      fetchData();
+    } catch (error) {
+      toast.push({ title: 'Unable to update zone', variant: 'error' });
+    }
+  };
+
+  const runSearch = async () => {
+    if (!search) return;
+    try {
+      const result = await apiFetch(`/api/admin/search?q=${encodeURIComponent(search)}`);
+      setSearchResults(result);
+    } catch (error) {
+      toast.push({ title: 'Search failed', variant: 'error' });
+    }
+  };
+
+  const filteredOrders = useMemo(() => {
+    if (!search) return orders;
+    return orders.filter((order) => order.pickup_address?.toLowerCase().includes(search.toLowerCase()) || `${order.id}`.includes(search) || `${order.tracking_code || ''}`.toLowerCase().includes(search.toLowerCase()));
+  }, [orders, search]);
+
   if (loading) return <div className="text-center py-12 text-gray-500">Loading admin dashboard...</div>;
 
-  const totalRevenue = deliveries.filter(d => d.delivery_status === 'delivered').reduce((acc, curr) => acc + curr.price, 0);
+  const pendingDrivers = drivers.filter((d) => d.status === 'pending');
 
   const renderOverview = () => (
     <div className="space-y-8 animate-in fade-in duration-300">
@@ -86,8 +209,8 @@ export default function AdminDashboard() {
             <Package className="w-8 h-8" />
           </div>
           <div>
-            <p className="text-sm text-gray-500 font-medium">Total Deliveries</p>
-            <p className="text-2xl font-bold text-[#2A1B7A]">{deliveries.length}</p>
+            <p className="text-sm text-gray-500 font-medium">Total Orders</p>
+            <p className="text-2xl font-bold text-[#2A1B7A]">{orders.length}</p>
           </div>
         </div>
         <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 flex items-center gap-4">
@@ -95,8 +218,8 @@ export default function AdminDashboard() {
             <BarChart3 className="w-8 h-8" />
           </div>
           <div>
-            <p className="text-sm text-gray-500 font-medium">Total Revenue</p>
-            <p className="text-2xl font-bold text-[#2A1B7A]">{totalRevenue.toLocaleString()} ETB</p>
+            <p className="text-sm text-gray-500 font-medium">Revenue</p>
+            <p className="text-2xl font-bold text-[#2A1B7A]">{formatCurrency(reports.revenue || 0)}</p>
           </div>
         </div>
       </div>
@@ -104,36 +227,28 @@ export default function AdminDashboard() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
         <div className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden">
           <div className="p-6 border-b border-gray-100 flex justify-between items-center">
-            <h2 className="text-xl font-bold text-[#2A1B7A]">Recent Deliveries</h2>
+            <h2 className="text-xl font-bold text-[#2A1B7A]">Recent Orders</h2>
             <Button variant="outline" size="sm" onClick={() => setActiveTab('orders')}>View All</Button>
           </div>
           <div className="divide-y divide-gray-100">
-            {deliveries.slice(0, 5).map(delivery => (
-              <div key={delivery.id} className="p-6">
+            {orders.slice(0, 5).map(order => (
+              <div key={order.id} className="p-6">
                 <div className="flex justify-between items-start mb-2">
-                  <h4 className="font-bold text-gray-900">{delivery.parcel_description}</h4>
-                  <span className="text-sm font-bold text-[#F28C3A]">{delivery.price} ETB</span>
+                  <h4 className="font-bold text-gray-900">Order #{order.id}</h4>
+                  <span className="text-sm font-bold text-[#F28C3A]">{formatCurrency(order.total || 0)}</span>
                 </div>
                 <div className="flex justify-between items-center">
-                  <p className="text-sm text-gray-500">
-                    {delivery.pickup_location} → {delivery.drop_location}
-                  </p>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-bold uppercase text-gray-500 bg-gray-100 px-2 py-1 rounded-md">
-                      {delivery.delivery_status.replace('_', ' ')}
-                    </span>
-                    <Button 
-                      onClick={() => navigate(`/tracking/${delivery.id}`)}
-                      size="sm" 
-                      className="bg-[#2A1B7A] hover:bg-[#2A1B7A]/90 text-white h-6 px-2 text-xs"
-                    >
-                      Track
-                    </Button>
+                  <p className="text-sm text-gray-500">{order.pickup_address} → {order.dropoff_address}</p>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-bold uppercase text-gray-500 bg-gray-100 px-2 py-1 rounded-md">{order.status.replace('_', ' ')}</span>
+                      <Button onClick={() => navigate(`/orders/${order.id}`)} size="sm" className="bg-[#2A1B7A] hover:bg-[#2A1B7A]/90 text-white h-6 px-2 text-xs">
+                        View
+                      </Button>
+                    </div>
                   </div>
                 </div>
-              </div>
             ))}
-            {deliveries.length === 0 && <div className="p-6 text-center text-gray-500">No deliveries found.</div>}
+            {orders.length === 0 && <div className="p-6 text-center text-gray-500">No orders found.</div>}
           </div>
         </div>
 
@@ -143,7 +258,7 @@ export default function AdminDashboard() {
             <Button variant="outline" size="sm" onClick={() => setActiveTab('drivers')}>Manage</Button>
           </div>
           <div className="divide-y divide-gray-100">
-            {drivers.filter(d => d.status === 'pending').map(driver => (
+            {pendingDrivers.map(driver => (
               <div key={driver.id} className="p-6 flex items-center justify-between">
                 <div>
                   <h4 className="font-bold text-gray-900">{driver.name}</h4>
@@ -159,7 +274,7 @@ export default function AdminDashboard() {
                 </div>
               </div>
             ))}
-            {drivers.filter(d => d.status === 'pending').length === 0 && <div className="p-6 text-center text-gray-500">No pending applications.</div>}
+            {pendingDrivers.length === 0 && <div className="p-6 text-center text-gray-500">No pending applications.</div>}
           </div>
         </div>
       </div>
@@ -173,7 +288,7 @@ export default function AdminDashboard() {
         <div className="flex gap-2 w-full sm:w-auto">
           <div className="relative flex-1 sm:w-64">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-            <Input placeholder="Search orders..." className="pl-9 h-10" />
+            <Input placeholder="Search orders..." className="pl-9 h-10" value={search} onChange={(e) => setSearch(e.target.value)} />
           </div>
           <Button variant="outline" className="h-10 px-3"><Filter className="h-4 w-4" /></Button>
         </div>
@@ -187,40 +302,47 @@ export default function AdminDashboard() {
               <th className="p-4 font-medium">Details</th>
               <th className="p-4 font-medium">Status</th>
               <th className="p-4 font-medium">Price</th>
+              <th className="p-4 font-medium">Assign</th>
               <th className="p-4 font-medium">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
-            {deliveries.map(delivery => (
-              <tr key={delivery.id} className="hover:bg-gray-50/50 transition-colors">
-                <td className="p-4 text-sm font-medium text-gray-900">#{delivery.id.toString().padStart(5, '0')}</td>
-                <td className="p-4 text-sm text-gray-600">{delivery.sender_name || 'Customer'}</td>
-                <td className="p-4 text-sm text-gray-600 max-w-xs truncate">{delivery.parcel_description}</td>
+            {filteredOrders.map(order => (
+              <tr key={order.id} className="hover:bg-gray-50/50 transition-colors">
+                <td className="p-4 text-sm font-medium text-gray-900">#{order.id.toString().padStart(5, '0')}</td>
+                <td className="p-4 text-sm text-gray-600">Customer</td>
+                <td className="p-4 text-sm text-gray-600 max-w-xs truncate">{order.pickup_address} → {order.dropoff_address}</td>
                 <td className="p-4">
-                  <span className={`px-2 py-1 rounded-full text-xs font-bold uppercase tracking-wider ${
-                    delivery.delivery_status === 'delivered' ? 'bg-green-100 text-green-800' :
-                    delivery.delivery_status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
-                    'bg-blue-100 text-blue-800'
-                  }`}>
-                    {delivery.delivery_status.replace('_', ' ')}
+                  <span className="px-2 py-1 rounded-full text-xs font-bold uppercase tracking-wider bg-gray-100 text-gray-700">
+                    {order.status.replace('_', ' ')}
                   </span>
+                  {order.sla_status && (
+                    <span className={`ml-2 text-xs font-semibold ${order.sla_status === 'late' ? 'text-red-600' : order.sla_status === 'at_risk' ? 'text-orange-500' : 'text-green-600'}`}>
+                      {order.sla_status.replace('_', ' ')}
+                    </span>
+                  )}
                 </td>
-                <td className="p-4 text-sm font-bold text-[#F28C3A]">{delivery.price} ETB</td>
+                <td className="p-4 text-sm font-bold text-[#F28C3A]">{formatCurrency(order.total || 0)}</td>
+                <td className="p-4">
+                  <select
+                    className="rounded-xl border border-gray-200 px-2 py-1 text-xs"
+                    onChange={(e) => assignDriver(order.id, Number(e.target.value))}
+                    value={order.driver_id || ''}
+                  >
+                    <option value="">Assign</option>
+                    {drivers.filter((d) => d.status === 'approved').map((driver) => (
+                      <option key={driver.user_id} value={driver.user_id}>{driver.name}</option>
+                    ))}
+                  </select>
+                </td>
                 <td className="p-4">
                   <div className="flex gap-2">
-                    <Button variant="outline" size="sm">View</Button>
-                    <Button 
-                      onClick={() => navigate(`/tracking/${delivery.id}`)}
-                      size="sm" 
-                      className="bg-[#2A1B7A] hover:bg-[#2A1B7A]/90 text-white"
-                    >
-                      Track
-                    </Button>
+                    <Button variant="outline" size="sm" onClick={() => navigate(`/orders/${order.id}`)}>View</Button>
                   </div>
                 </td>
               </tr>
             ))}
-            {deliveries.length === 0 && <tr><td colSpan={6} className="p-8 text-center text-gray-500">No orders found.</td></tr>}
+            {filteredOrders.length === 0 && <tr><td colSpan={7} className="p-8 text-center text-gray-500">No orders found.</td></tr>}
           </tbody>
         </table>
       </div>
@@ -243,210 +365,267 @@ export default function AdminDashboard() {
           <thead>
             <tr className="bg-gray-50 text-gray-500 text-sm uppercase tracking-wider">
               <th className="p-4 font-medium">Driver</th>
-              <th className="p-4 font-medium">Contact</th>
-              <th className="p-4 font-medium">Vehicle</th>
               <th className="p-4 font-medium">Status</th>
+              <th className="p-4 font-medium">Verification</th>
+              <th className="p-4 font-medium">Online</th>
+              <th className="p-4 font-medium">Accept Rate</th>
               <th className="p-4 font-medium">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
-            {drivers.map(driver => (
-              <tr key={driver.id} className="hover:bg-gray-50/50 transition-colors">
-                <td className="p-4">
-                  <div className="font-bold text-gray-900">{driver.name}</div>
-                  <div className="text-xs text-gray-500">ID: {driver.id}</div>
+            {drivers.map((driver) => (
+              <tr key={driver.id} className="hover:bg-gray-50/50">
+                <td className="p-4 text-sm text-gray-700">
+                  <div className="font-semibold text-gray-900">{driver.name}</div>
+                  <div className="text-xs text-gray-400">{driver.email}</div>
                 </td>
-                <td className="p-4 text-sm text-gray-600">
-                  <div>{driver.phone}</div>
-                  <div className="text-xs">{driver.email}</div>
-                </td>
-                <td className="p-4 text-sm text-gray-600 capitalize">{driver.vehicle_type}</td>
-                <td className="p-4">
-                  <span className={`px-2 py-1 rounded-full text-xs font-bold uppercase tracking-wider ${
-                    driver.status === 'approved' ? 'bg-green-100 text-green-800' :
-                    driver.status === 'rejected' ? 'bg-red-100 text-red-800' :
-                    'bg-yellow-100 text-yellow-800'
-                  }`}>
-                    {driver.status}
-                  </span>
-                </td>
+                <td className="p-4 text-sm text-gray-600">{driver.status}</td>
+                <td className="p-4 text-sm text-gray-600">{driver.verification_status || 'pending'}</td>
+                <td className="p-4 text-sm text-gray-600">{driver.is_online ? 'Online' : 'Offline'}</td>
+                <td className="p-4 text-sm text-gray-600">{Math.round((driver.accept_rate || 1) * 100)}%</td>
                 <td className="p-4">
                   <div className="flex gap-2">
-                    {driver.status === 'pending' && (
+                    {driver.status === 'pending' ? (
                       <>
-                        <Button size="sm" onClick={() => updateDriverStatus(driver.id, 'approved')} className="bg-green-600 hover:bg-green-700 text-white">Approve</Button>
-                        <Button size="sm" variant="outline" onClick={() => updateDriverStatus(driver.id, 'rejected')} className="text-red-600 border-red-200 hover:bg-red-50">Reject</Button>
+                        <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white" onClick={() => updateDriverStatus(driver.id, 'approved')}>Approve</Button>
+                        <Button size="sm" variant="outline" onClick={() => updateDriverStatus(driver.id, 'rejected')}>Reject</Button>
                       </>
-                    )}
-                    {driver.status !== 'pending' && (
-                      <Button variant="outline" size="sm">Details</Button>
+                    ) : (
+                      <Button size="sm" variant="outline" onClick={() => updateDriverStatus(driver.id, driver.status === 'approved' ? 'rejected' : 'approved')}>
+                        {driver.status === 'approved' ? 'Suspend' : 'Re-approve'}
+                      </Button>
                     )}
                   </div>
                 </td>
               </tr>
             ))}
-            {drivers.length === 0 && <tr><td colSpan={5} className="p-8 text-center text-gray-500">No drivers found.</td></tr>}
           </tbody>
         </table>
       </div>
     </div>
   );
 
-  const renderCustomers = () => (
-    <div className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden animate-in fade-in duration-300">
-      <div className="p-6 border-b border-gray-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-        <h2 className="text-xl font-bold text-[#2A1B7A]">Customer Management</h2>
-        <div className="flex gap-2 w-full sm:w-auto">
-          <div className="relative flex-1 sm:w-64">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-            <Input placeholder="Search customers..." className="pl-9 h-10" />
+  const renderMap = () => (
+    <div className="bg-white rounded-3xl shadow-sm border border-gray-100 p-6 space-y-4">
+      <div className="flex items-center gap-3 text-[#2A1B7A] font-bold">
+        <Map className="h-6 w-6 text-[#F28C3A]" /> Live Map (driver coordinates)
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {drivers.map((driver) => (
+          <div key={driver.id} className="border border-gray-100 rounded-2xl p-4">
+            <div className="font-semibold text-[#2A1B7A]">{driver.name}</div>
+            <div className="text-sm text-gray-500">{driver.last_lat?.toFixed(4) || '—'}, {driver.last_lng?.toFixed(4) || '—'}</div>
           </div>
-        </div>
-      </div>
-      <div className="overflow-x-auto">
-        <table className="w-full text-left border-collapse">
-          <thead>
-            <tr className="bg-gray-50 text-gray-500 text-sm uppercase tracking-wider">
-              <th className="p-4 font-medium">Customer</th>
-              <th className="p-4 font-medium">Contact</th>
-              <th className="p-4 font-medium">Joined</th>
-              <th className="p-4 font-medium">Orders</th>
-              <th className="p-4 font-medium">Actions</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-100">
-            {users.filter(u => u.role === 'customer').map(customer => (
-              <tr key={customer.id} className="hover:bg-gray-50/50 transition-colors">
-                <td className="p-4">
-                  <div className="font-bold text-gray-900">{customer.name}</div>
-                  <div className="text-xs text-gray-500">ID: {customer.id}</div>
-                </td>
-                <td className="p-4 text-sm text-gray-600">
-                  <div>{customer.phone || 'N/A'}</div>
-                  <div className="text-xs">{customer.email}</div>
-                </td>
-                <td className="p-4 text-sm text-gray-600">
-                  {format(new Date(customer.created_at || new Date()), 'MMM d, yyyy')}
-                </td>
-                <td className="p-4 text-sm font-bold text-[#2A1B7A]">
-                  {deliveries.filter(d => d.sender_id === customer.id).length}
-                </td>
-                <td className="p-4">
-                  <Button variant="outline" size="sm">View</Button>
-                </td>
-              </tr>
-            ))}
-            {users.filter(u => u.role === 'customer').length === 0 && <tr><td colSpan={5} className="p-8 text-center text-gray-500">No customers found.</td></tr>}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-
-  const renderProducts = () => (
-    <div className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden animate-in fade-in duration-300">
-      <div className="p-6 border-b border-gray-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-        <h2 className="text-xl font-bold text-[#2A1B7A]">ZED Store Inventory</h2>
-        <div className="flex gap-2 w-full sm:w-auto">
-          <div className="relative flex-1 sm:w-64">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-            <Input placeholder="Search products..." className="pl-9 h-10" />
-          </div>
-          <Button className="bg-[#F28C3A] hover:bg-[#F28C3A]/90 text-white h-10">Add Product</Button>
-        </div>
-      </div>
-      <div className="p-12 text-center">
-        <ShoppingBag className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-        <h3 className="text-xl font-bold text-gray-500">Inventory Management</h3>
-        <p className="text-gray-400 max-w-sm mx-auto mt-2">Product listing and inventory management interface is being connected to the database.</p>
+        ))}
+        {drivers.length === 0 && <div className="text-sm text-gray-500">No drivers available.</div>}
       </div>
     </div>
   );
 
   const renderOperations = () => (
-    <div className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden animate-in fade-in duration-300 h-[600px] flex flex-col">
-      <div className="p-6 border-b border-gray-100 flex justify-between items-center">
+    <div className="space-y-8">
+      <div className="bg-white rounded-3xl shadow-sm border border-gray-100 p-6 space-y-4">
         <h2 className="text-xl font-bold text-[#2A1B7A] flex items-center gap-2">
-          <Map className="h-5 w-5 text-[#F28C3A]" /> Live Operations Map
+          <Search className="h-5 w-5 text-[#F28C3A]" /> Global Search
         </h2>
-        <div className="flex gap-2">
-          <span className="flex items-center gap-1 text-sm text-gray-600"><span className="w-3 h-3 rounded-full bg-green-500"></span> Active Drivers (12)</span>
-          <span className="flex items-center gap-1 text-sm text-gray-600"><span className="w-3 h-3 rounded-full bg-orange-500"></span> Pending Orders (5)</span>
+        <div className="flex flex-col sm:flex-row gap-3">
+          <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search by tracking ID, phone, name..." />
+          <Button onClick={runSearch} className="bg-[#2A1B7A] hover:bg-[#2A1B7A]/90">Search</Button>
+        </div>
+        {(searchResults.orders?.length > 0 || searchResults.users?.length > 0) && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="border border-gray-100 rounded-2xl p-4">
+              <h4 className="font-semibold text-[#2A1B7A] mb-2">Orders</h4>
+              {searchResults.orders.map((order: any) => (
+                <div key={order.id} className="flex items-center justify-between py-2 border-b border-gray-100 last:border-b-0">
+                  <span className="text-sm text-gray-600">{order.tracking_code || `#${order.id}`}</span>
+                  <Button size="sm" variant="outline" onClick={() => navigate(`/orders/${order.id}`)}>Open</Button>
+                </div>
+              ))}
+              {searchResults.orders.length === 0 && <p className="text-sm text-gray-400">No orders found.</p>}
+            </div>
+            <div className="border border-gray-100 rounded-2xl p-4">
+              <h4 className="font-semibold text-[#2A1B7A] mb-2">Users</h4>
+              {searchResults.users.map((u: any) => (
+                <div key={u.id} className="text-sm text-gray-600 py-2 border-b border-gray-100 last:border-b-0">
+                  {u.name} • {u.phone || u.email}
+                </div>
+              ))}
+              {searchResults.users.length === 0 && <p className="text-sm text-gray-400">No users found.</p>}
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="bg-white rounded-3xl shadow-sm border border-gray-100 p-6 space-y-4">
+        <h2 className="text-xl font-bold text-[#2A1B7A]">Support Tickets</h2>
+        <div className="space-y-3">
+          {tickets.map((ticket) => (
+            <div key={ticket.id} className="border border-gray-100 rounded-2xl p-4 flex flex-col md:flex-row justify-between gap-3">
+              <div>
+                <p className="font-semibold text-gray-900">#{ticket.id} • {ticket.category}</p>
+                <p className="text-sm text-gray-500">Order {ticket.tracking_code || ticket.order_id} • {ticket.order_status}</p>
+                <p className="text-xs text-gray-400">{ticket.description || 'No description'}</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <select
+                  className="rounded-xl border border-gray-200 px-3 py-2 text-xs"
+                  value={ticket.status}
+                  onChange={(e) => updateTicketStatus(ticket.id, e.target.value)}
+                >
+                  <option value="open">Open</option>
+                  <option value="in_review">In Review</option>
+                  <option value="resolved">Resolved</option>
+                </select>
+              </div>
+            </div>
+          ))}
+          {tickets.length === 0 && <p className="text-sm text-gray-400">No tickets yet.</p>}
         </div>
       </div>
-      <div className="flex-1 bg-gray-100 relative flex items-center justify-center">
-        {/* Placeholder for actual map integration */}
-        <div className="text-center space-y-4">
-          <Map className="h-16 w-16 text-gray-300 mx-auto" />
-          <h3 className="text-xl font-bold text-gray-500">Map Integration Pending</h3>
-          <p className="text-gray-400 max-w-sm mx-auto">The live tracking map requires a Google Maps API key or similar service to be configured.</p>
-          <Button variant="outline" className="mt-4">Configure Map Provider</Button>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="bg-white rounded-3xl shadow-sm border border-gray-100 p-6 space-y-4">
+          <h2 className="text-xl font-bold text-[#2A1B7A]">Promos</h2>
+          <div className="grid grid-cols-2 gap-3">
+            <Input placeholder="Code" value={promoForm.code} onChange={(e) => setPromoForm({ ...promoForm, code: e.target.value })} />
+            <select className="h-10 rounded-xl border border-gray-300 px-3" value={promoForm.discountType} onChange={(e) => setPromoForm({ ...promoForm, discountType: e.target.value })}>
+              <option value="flat">Flat</option>
+              <option value="percent">Percent</option>
+            </select>
+            <Input placeholder="Amount" type="number" value={promoForm.amount} onChange={(e) => setPromoForm({ ...promoForm, amount: Number(e.target.value) })} />
+            <Input placeholder="Min spend" type="number" value={promoForm.minSpend} onChange={(e) => setPromoForm({ ...promoForm, minSpend: Number(e.target.value) })} />
+          </div>
+          <Button onClick={createPromo} className="bg-[#2A1B7A] hover:bg-[#2A1B7A]/90">Create Promo</Button>
+          <div className="space-y-2">
+            {promos.map((promo) => (
+              <div key={promo.id} className="flex items-center justify-between text-sm text-gray-600">
+                <span>{promo.code} • {promo.discount_type === 'percent' ? `${promo.amount}%` : formatCurrency(promo.amount)}</span>
+                <button onClick={() => togglePromo(promo.id, promo.active === 0)} className="text-xs font-semibold text-[#F28C3A]">
+                  {promo.active ? 'Disable' : 'Enable'}
+                </button>
+              </div>
+            ))}
+          </div>
         </div>
-        
-        {/* Mock Map Elements */}
-        <div className="absolute top-1/4 left-1/4 w-4 h-4 bg-green-500 rounded-full border-2 border-white shadow-md animate-pulse"></div>
-        <div className="absolute top-1/3 right-1/3 w-4 h-4 bg-orange-500 rounded-full border-2 border-white shadow-md"></div>
-        <div className="absolute bottom-1/4 right-1/4 w-4 h-4 bg-green-500 rounded-full border-2 border-white shadow-md animate-pulse"></div>
+
+        <div className="bg-white rounded-3xl shadow-sm border border-gray-100 p-6 space-y-4">
+          <h2 className="text-xl font-bold text-[#2A1B7A]">Pricing Rules</h2>
+          <div className="grid grid-cols-2 gap-3">
+            <Input placeholder="Zone" value={pricingForm.zoneName} onChange={(e) => setPricingForm({ ...pricingForm, zoneName: e.target.value })} />
+            <select className="h-10 rounded-xl border border-gray-300 px-3" value={pricingForm.serviceType} onChange={(e) => setPricingForm({ ...pricingForm, serviceType: e.target.value })}>
+              <option value="express">Express</option>
+              <option value="same_day">Same Day</option>
+              <option value="next_day">Next Day</option>
+              <option value="scheduled">Scheduled</option>
+            </select>
+            <Input placeholder="Base fare" type="number" value={pricingForm.baseFare} onChange={(e) => setPricingForm({ ...pricingForm, baseFare: Number(e.target.value) })} />
+            <Input placeholder="Per km" type="number" value={pricingForm.perKm} onChange={(e) => setPricingForm({ ...pricingForm, perKm: Number(e.target.value) })} />
+            <Input placeholder="Weight rate" type="number" value={pricingForm.weightRate} onChange={(e) => setPricingForm({ ...pricingForm, weightRate: Number(e.target.value) })} />
+            <Input placeholder="Surge" type="number" step="0.1" value={pricingForm.surgeMultiplier} onChange={(e) => setPricingForm({ ...pricingForm, surgeMultiplier: Number(e.target.value) })} />
+          </div>
+          <Button onClick={createPricingRule} className="bg-[#2A1B7A] hover:bg-[#2A1B7A]/90">Add Rule</Button>
+          <div className="space-y-2 text-sm text-gray-600">
+            {pricingRules.map((rule) => (
+              <div key={rule.id} className="flex items-center justify-between">
+                <span>{rule.zone_name || 'All zones'} • {rule.service_type || 'All'} • {formatCurrency(rule.base_fare)}</span>
+                <span className="text-xs text-gray-400">x{rule.surge_multiplier || 1}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-3xl shadow-sm border border-gray-100 p-6 space-y-4">
+        <h2 className="text-xl font-bold text-[#2A1B7A]">Service Zones</h2>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {zones.map((zone) => (
+            <div key={zone.id} className="border border-gray-100 rounded-2xl p-4 flex items-center justify-between">
+              <div>
+                <p className="font-semibold text-gray-800">{zone.name}</p>
+                <p className="text-xs text-gray-400">{zone.status}</p>
+              </div>
+              <button onClick={() => updateZoneStatus(zone.id, zone.status === 'active' ? 'coming_soon' : 'active')} className="text-xs font-semibold text-[#F28C3A]">
+                {zone.status === 'active' ? 'Mark coming soon' : 'Activate'}
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="bg-white rounded-3xl shadow-sm border border-gray-100 p-6 space-y-4">
+        <h2 className="text-xl font-bold text-[#2A1B7A]">Audit Log</h2>
+        <div className="space-y-2 text-sm text-gray-600">
+          {auditLogs.map((log) => (
+            <div key={log.id} className="flex justify-between border-b border-gray-100 pb-2">
+              <span>{log.action} • {log.entity_type} #{log.entity_id}</span>
+              <span className="text-xs text-gray-400">{formatShortDate(log.created_at)}</span>
+            </div>
+          ))}
+          {auditLogs.length === 0 && <p className="text-sm text-gray-400">No audit entries.</p>}
+        </div>
       </div>
     </div>
   );
 
-  const renderPlaceholder = (title: string, icon: React.ReactNode) => (
-    <div className="bg-white rounded-3xl shadow-sm border border-gray-100 p-12 text-center animate-in fade-in duration-300">
-      <div className="flex justify-center mb-4 text-gray-300">{icon}</div>
-      <h2 className="text-2xl font-bold text-[#2A1B7A] mb-2">{title} Management</h2>
-      <p className="text-gray-500 max-w-md mx-auto">This module is currently under development. Check back soon for full functionality.</p>
+  const renderReports = () => (
+    <div className="bg-white rounded-3xl shadow-sm border border-gray-100 p-6 space-y-6">
+      <h2 className="text-xl font-bold text-[#2A1B7A]">Operational Reports</h2>
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div className="p-4 rounded-2xl border border-gray-100">
+          <p className="text-sm text-gray-500">Completed Deliveries</p>
+          <p className="text-2xl font-bold text-[#2A1B7A]">{reports.completedOrders || 0}</p>
+        </div>
+        <div className="p-4 rounded-2xl border border-gray-100">
+          <p className="text-sm text-gray-500">Cancellations</p>
+          <p className="text-2xl font-bold text-[#2A1B7A]">{reports.cancellations || 0}</p>
+        </div>
+        <div className="p-4 rounded-2xl border border-gray-100">
+          <p className="text-sm text-gray-500">At Risk</p>
+          <p className="text-2xl font-bold text-orange-500">{reports.atRisk || 0}</p>
+        </div>
+        <div className="p-4 rounded-2xl border border-gray-100">
+          <p className="text-sm text-gray-500">Late</p>
+          <p className="text-2xl font-bold text-red-600">{reports.late || 0}</p>
+        </div>
+        <div className="p-4 rounded-2xl border border-gray-100">
+          <p className="text-sm text-gray-500">Revenue</p>
+          <p className="text-2xl font-bold text-[#2A1B7A]">{formatCurrency(reports.revenue || 0)}</p>
+        </div>
+      </div>
+      <div className="text-sm text-gray-500 flex items-center gap-2">
+        <AlertTriangle className="h-4 w-4" /> KPI charts will appear here in the full analytics module.
+      </div>
     </div>
   );
-
-  const tabs = [
-    { id: 'overview', label: 'Overview', icon: <BarChart3 className="w-4 h-4" /> },
-    { id: 'orders', label: 'Orders', icon: <Package className="w-4 h-4" /> },
-    { id: 'drivers', label: 'Drivers', icon: <Truck className="w-4 h-4" /> },
-    { id: 'customers', label: 'Customers', icon: <Users className="w-4 h-4" /> },
-    { id: 'products', label: 'ZED Store', icon: <ShoppingBag className="w-4 h-4" /> },
-    { id: 'operations', label: 'Live Map', icon: <Map className="w-4 h-4" /> },
-    { id: 'reports', label: 'Reports', icon: <BarChart3 className="w-4 h-4" /> },
-  ];
 
   return (
-    <div className="space-y-8 pb-20">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+    <div className="space-y-8">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h1 className="text-3xl font-bold text-[#2A1B7A]">Admin Control Center</h1>
-          <p className="text-gray-500 mt-1">Manage operations, users, and store inventory</p>
+          <p className="text-gray-500">Monitor performance, dispatch, and drivers in real time.</p>
         </div>
-        <Button variant="outline" className="bg-white"><Settings className="w-4 h-4 mr-2" /> Settings</Button>
       </div>
 
-      {/* Navigation Tabs */}
-      <div className="flex overflow-x-auto pb-2 scrollbar-hide gap-2 border-b border-gray-200">
-        {tabs.map(tab => (
+      <div className="flex gap-4 border-b border-gray-200 overflow-x-auto pb-2">
+        {['overview', 'orders', 'drivers', 'reports', 'operations', 'map'].map((tab) => (
           <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id as TabType)}
-            className={`flex items-center gap-2 px-4 py-3 font-medium text-sm whitespace-nowrap border-b-2 transition-colors ${
-              activeTab === tab.id
-                ? 'border-[#F28C3A] text-[#F28C3A]'
-                : 'border-transparent text-gray-500 hover:text-gray-800 hover:border-gray-300'
-            }`}
+            key={tab}
+            onClick={() => setActiveTab(tab as TabType)}
+            className={`pb-2 font-medium whitespace-nowrap ${activeTab === tab ? 'text-[#2A1B7A] border-b-2 border-[#2A1B7A]' : 'text-gray-500 hover:text-gray-700'}`}
           >
-            {tab.icon}
-            {tab.label}
+            {tab.charAt(0).toUpperCase() + tab.slice(1)}
           </button>
         ))}
       </div>
 
-      {/* Tab Content */}
-      <div className="mt-6">
-        {activeTab === 'overview' && renderOverview()}
-        {activeTab === 'orders' && renderOrders()}
-        {activeTab === 'drivers' && renderDrivers()}
-        {activeTab === 'customers' && renderCustomers()}
-        {activeTab === 'products' && renderProducts()}
-        {activeTab === 'operations' && renderOperations()}
-        {activeTab === 'reports' && renderPlaceholder('Analytics & Reports', <BarChart3 className="w-16 h-16" />)}
-      </div>
+      {activeTab === 'overview' && renderOverview()}
+      {activeTab === 'orders' && renderOrders()}
+      {activeTab === 'drivers' && renderDrivers()}
+      {activeTab === 'reports' && renderReports()}
+      {activeTab === 'operations' && renderOperations()}
+      {activeTab === 'map' && renderMap()}
     </div>
   );
 }

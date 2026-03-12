@@ -2,10 +2,19 @@ import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom';
 import { Package, LogOut, User, Menu, X, Facebook, Twitter, Instagram } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
+const CONTACT = {
+  phone: '+251 911 000 000',
+  email: 'support@zemenexpress.com',
+  address: 'Bole Road, Addis Ababa, Ethiopia',
+};
+
+const SECTION_IDS = ['home', 'services', 'store', 'track', 'pricing', 'contact'];
+
 export default function Layout() {
   const navigate = useNavigate();
   const location = useLocation();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [activeSection, setActiveSection] = useState('home');
   const userStr = localStorage.getItem('user');
   const user = userStr ? JSON.parse(userStr) : null;
 
@@ -36,10 +45,34 @@ export default function Layout() {
     section.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }, [location.pathname, location.hash]);
 
+  useEffect(() => {
+    if (location.pathname !== '/') return;
+    const sections = SECTION_IDS.map((id) => document.getElementById(id)).filter(Boolean) as HTMLElement[];
+    if (!sections.length) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const visible = entries
+          .filter((entry) => entry.isIntersecting)
+          .sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
+        if (visible?.target?.id) {
+          setActiveSection(visible.target.id);
+        }
+      },
+      { threshold: [0.2, 0.5, 0.75], rootMargin: '-20% 0px -55% 0px' }
+    );
+
+    sections.forEach((section) => observer.observe(section));
+    return () => observer.disconnect();
+  }, [location.pathname]);
+
+  const navItemClass = (sectionId: string) =>
+    `text-sm font-semibold transition-colors ${activeSection === sectionId ? 'text-[#F28C3A]' : 'text-slate-600 hover:text-[#F28C3A]'}`;
+
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
-      <header className="bg-white shadow-sm sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+    <div className="min-h-screen bg-[#F7F7FB] flex flex-col">
+      <header className="bg-white/80 backdrop-blur-xl border-b border-slate-100 sticky top-0 z-50">
+        <div className="max-w-[1200px] mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
           <Link to="/" className="flex items-center gap-2">
             <div className="bg-[#2A1B7A] p-2 rounded-xl">
               <Package className="h-6 w-6 text-[#F28C3A]" />
@@ -48,41 +81,74 @@ export default function Layout() {
           </Link>
 
           {/* Desktop Nav */}
-          <div className="hidden md:flex items-center gap-6">
+          <div className="hidden md:flex items-center gap-5">
             <button
               type="button"
               onClick={() => handleSectionNav('home')}
-              className="text-gray-600 hover:text-[#F28C3A] font-medium"
+              className={navItemClass('home')}
+              aria-current={activeSection === 'home' ? 'page' : undefined}
             >
               Home
             </button>
             <button
               type="button"
               onClick={() => handleSectionNav('services')}
-              className="text-gray-600 hover:text-[#F28C3A] font-medium"
+              className={navItemClass('services')}
+              aria-current={activeSection === 'services' ? 'page' : undefined}
             >
               Services
             </button>
-            <Link to="/store" className="text-gray-600 hover:text-[#F28C3A] font-medium flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => handleSectionNav('store')}
+              className={navItemClass('store')}
+              aria-current={activeSection === 'store' ? 'page' : undefined}
+            >
               Store
-            </Link>
+            </button>
+            <button
+              type="button"
+              onClick={() => handleSectionNav('track')}
+              className={navItemClass('track')}
+              aria-current={activeSection === 'track' ? 'page' : undefined}
+            >
+              Track
+            </button>
+            <button
+              type="button"
+              onClick={() => handleSectionNav('pricing')}
+              className={navItemClass('pricing')}
+              aria-current={activeSection === 'pricing' ? 'page' : undefined}
+            >
+              Pricing
+            </button>
+            <button
+              type="button"
+              onClick={() => handleSectionNav('contact')}
+              className={navItemClass('contact')}
+              aria-current={activeSection === 'contact' ? 'page' : undefined}
+            >
+              Contact
+            </button>
             {user ? (
               <>
-                <Link to={`/${user.role}-dashboard`} className="text-gray-600 hover:text-[#F28C3A] font-medium">
+                <Link to={`/${user.role}-dashboard`} className="text-sm font-semibold text-slate-600 hover:text-[#F28C3A] transition-colors">
                   Dashboard
                 </Link>
-                <div className="flex items-center gap-2 text-sm text-gray-500 bg-gray-100 px-3 py-1.5 rounded-full">
+                <div className="flex items-center gap-2 text-xs text-slate-500 bg-slate-100 px-3 py-1.5 rounded-full">
                   <User className="h-4 w-4" />
                   <span>{user.name} ({user.role})</span>
                 </div>
-                <button onClick={handleLogout} className="text-gray-500 hover:text-red-600 p-2">
+                <button onClick={handleLogout} className="text-slate-500 hover:text-red-600 p-2">
                   <LogOut className="h-5 w-5" />
                 </button>
               </>
             ) : (
               <>
-                <Link to="/login" className="text-gray-600 hover:text-[#2A1B7A] font-medium">Login</Link>
-                <Link to="/register" className="bg-[#F28C3A] text-white px-4 py-2 rounded-xl font-medium hover:bg-[#F28C3A]/90 transition-colors">
+                <Link to="/login" className="btn-secondary px-4 py-2 text-sm">
+                  Login
+                </Link>
+                <Link to="/register" className="btn-primary px-4 py-2 text-sm">
                   Register
                 </Link>
               </>
@@ -97,31 +163,56 @@ export default function Layout() {
 
         {/* Mobile Nav */}
         {isMenuOpen && (
-          <div className="md:hidden border-t border-gray-100 bg-white px-4 py-4 space-y-4">
+          <div className="md:hidden border-t border-slate-100 bg-white px-4 py-4 space-y-4">
             <button
               type="button"
-              className="block text-left text-gray-600 font-medium w-full"
+              className={`block text-left font-semibold w-full ${activeSection === 'home' ? 'text-[#F28C3A]' : 'text-slate-600'}`}
               onClick={() => handleSectionNav('home')}
             >
               Home
             </button>
             <button
               type="button"
-              className="block text-left text-gray-600 font-medium w-full"
+              className={`block text-left font-semibold w-full ${activeSection === 'services' ? 'text-[#F28C3A]' : 'text-slate-600'}`}
               onClick={() => handleSectionNav('services')}
             >
               Services
             </button>
-            <Link to="/store" className="block text-gray-600 font-medium" onClick={() => setIsMenuOpen(false)}>
-              ZED Store
-            </Link>
+            <button
+              type="button"
+              className={`block text-left font-semibold w-full ${activeSection === 'store' ? 'text-[#F28C3A]' : 'text-slate-600'}`}
+              onClick={() => handleSectionNav('store')}
+            >
+              Store
+            </button>
+            <button
+              type="button"
+              className={`block text-left font-semibold w-full ${activeSection === 'track' ? 'text-[#F28C3A]' : 'text-slate-600'}`}
+              onClick={() => handleSectionNav('track')}
+            >
+              Track
+            </button>
+            <button
+              type="button"
+              className={`block text-left font-semibold w-full ${activeSection === 'pricing' ? 'text-[#F28C3A]' : 'text-slate-600'}`}
+              onClick={() => handleSectionNav('pricing')}
+            >
+              Pricing
+            </button>
+            <button
+              type="button"
+              className={`block text-left font-semibold w-full ${activeSection === 'contact' ? 'text-[#F28C3A]' : 'text-slate-600'}`}
+              onClick={() => handleSectionNav('contact')}
+            >
+              Contact
+            </button>
             {user ? (
               <>
-                <div className="flex items-center gap-2 text-sm text-gray-500 mb-4">
+                <div className="flex items-center gap-2 text-sm text-slate-500 mb-4">
                   <User className="h-4 w-4" />
                   <span>{user.name} ({user.role})</span>
                 </div>
-                <Link to={`/${user.role}-dashboard`} className="block text-gray-600 font-medium" onClick={() => setIsMenuOpen(false)}>
+                <Link to={`/${user.role}-dashboard`} className="block text-slate-600 font-semibold" onClick={() => setIsMenuOpen(false)}>
                   Dashboard
                 </Link>
                 <button onClick={() => { handleLogout(); setIsMenuOpen(false); }} className="flex items-center gap-2 text-red-600 font-medium w-full text-left">
@@ -130,8 +221,8 @@ export default function Layout() {
               </>
             ) : (
               <>
-                <Link to="/login" className="block text-gray-600 font-medium" onClick={() => setIsMenuOpen(false)}>Login</Link>
-                <Link to="/register" className="block text-[#F28C3A] font-medium" onClick={() => setIsMenuOpen(false)}>Register</Link>
+                <Link to="/login" className="block text-slate-600 font-semibold" onClick={() => setIsMenuOpen(false)}>Login</Link>
+                <Link to="/register" className="block text-[#F28C3A] font-semibold" onClick={() => setIsMenuOpen(false)}>Register</Link>
               </>
             )}
           </div>
@@ -139,13 +230,17 @@ export default function Layout() {
       </header>
 
       <main className="flex-1 w-full mx-auto">
-        <div className="max-w-7xl mx-auto p-4 sm:p-6 lg:p-8">
+        {location.pathname === '/' ? (
           <Outlet />
-        </div>
+        ) : (
+          <div className="max-w-[1200px] mx-auto p-4 sm:p-6 lg:p-8">
+            <Outlet />
+          </div>
+        )}
       </main>
 
-      <footer className="bg-white border-t border-gray-200 py-12 mt-auto">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 grid grid-cols-1 md:grid-cols-4 gap-8">
+      <footer className="bg-white border-t border-slate-100 py-12 mt-auto">
+        <div className="max-w-[1200px] mx-auto px-4 sm:px-6 lg:px-8 grid grid-cols-1 md:grid-cols-4 gap-8">
           <div className="space-y-4">
             <Link to="/" className="flex items-center gap-2">
               <div className="bg-[#2A1B7A] p-2 rounded-xl">
@@ -153,46 +248,46 @@ export default function Layout() {
               </div>
               <span className="font-bold text-xl text-[#2A1B7A]">Zemen Express</span>
             </Link>
-            <p className="text-gray-500 text-sm">
-              Your trusted partner for parcel and package delivery. We connect customers with reliable drivers for seamless logistics.
+            <p className="text-slate-500 text-sm">
+              Premium last-mile logistics with real-time tracking, verified couriers, and reliable service across Addis Ababa.
             </p>
           </div>
           <div>
             <h4 className="font-bold text-[#2A1B7A] mb-4">Quick Links</h4>
-            <ul className="space-y-2 text-sm text-gray-500">
+            <ul className="space-y-2 text-sm text-slate-500">
               <li><Link to="/" className="hover:text-[#F28C3A] transition-colors">Home</Link></li>
+              <li><button type="button" onClick={() => handleSectionNav('services')} className="hover:text-[#F28C3A] transition-colors">Services</button></li>
+              <li><button type="button" onClick={() => handleSectionNav('pricing')} className="hover:text-[#F28C3A] transition-colors">Pricing</button></li>
               <li><Link to="/store" className="hover:text-[#F28C3A] transition-colors">ZED Store</Link></li>
-              <li><Link to="/login" className="hover:text-[#F28C3A] transition-colors">Track Package</Link></li>
-              <li><Link to="/register" className="hover:text-[#F28C3A] transition-colors">Register</Link></li>
             </ul>
           </div>
           <div>
             <h4 className="font-bold text-[#2A1B7A] mb-4">Contact Us</h4>
-            <ul className="space-y-2 text-sm text-gray-500">
-              <li>Email: support@zemenexpress.com</li>
-              <li>Phone: +251 911 000000</li>
-              <li>Address: Addis Ababa, Ethiopia</li>
+            <ul className="space-y-2 text-sm text-slate-500">
+              <li>Email: {CONTACT.email}</li>
+              <li>Phone: {CONTACT.phone}</li>
+              <li>Address: {CONTACT.address}</li>
             </ul>
           </div>
           <div>
             <h4 className="font-bold text-[#2A1B7A] mb-4">Follow Us</h4>
             <div className="flex gap-4">
-              <a href="#" className="text-gray-400 hover:text-[#F28C3A] transition-colors">
+              <a href="#" className="text-slate-400 hover:text-[#F28C3A] transition-colors">
                 <span className="sr-only">Facebook</span>
                 <Facebook className="h-5 w-5" />
               </a>
-              <a href="#" className="text-gray-400 hover:text-[#F28C3A] transition-colors">
+              <a href="#" className="text-slate-400 hover:text-[#F28C3A] transition-colors">
                 <span className="sr-only">Twitter</span>
                 <Twitter className="h-5 w-5" />
               </a>
-              <a href="#" className="text-gray-400 hover:text-[#F28C3A] transition-colors">
+              <a href="#" className="text-slate-400 hover:text-[#F28C3A] transition-colors">
                 <span className="sr-only">Instagram</span>
                 <Instagram className="h-5 w-5" />
               </a>
             </div>
           </div>
         </div>
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-12 pt-8 border-t border-gray-100 text-center text-sm text-gray-400">
+        <div className="max-w-[1200px] mx-auto px-4 sm:px-6 lg:px-8 mt-12 pt-8 border-t border-slate-100 text-center text-sm text-slate-400">
           &copy; {new Date().getFullYear()} Zemen Express Delivery System. All rights reserved.
         </div>
       </footer>
