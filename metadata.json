@@ -1,0 +1,5 @@
+{
+  "name": "Zemen Express Delivery System",
+  "description": "A full-stack parcel and package delivery platform with customer, driver, and admin portals.",
+  "requestFramePermissions": []
+}
