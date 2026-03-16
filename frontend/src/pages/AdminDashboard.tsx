@@ -219,6 +219,7 @@ export default function AdminDashboard() {
   if (loading) return <div className="text-center py-12 text-gray-500">Loading admin dashboard...</div>;
 
   const pendingDrivers = drivers.filter((d) => d.status === 'pending');
+  const visibleUsers = users.filter((u) => u.role !== 'super_admin');
 
   const renderOverview = () => (
     <div className="space-y-8 animate-in fade-in duration-300">
@@ -229,7 +230,7 @@ export default function AdminDashboard() {
           </div>
           <div>
             <p className="text-sm text-gray-500 font-medium">Total Users</p>
-            <p className="text-2xl font-bold text-[#2A1B7A]">{users.length}</p>
+            <p className="text-2xl font-bold text-[#2A1B7A]">{visibleUsers.length}</p>
           </div>
         </div>
         <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 flex items-center gap-4">

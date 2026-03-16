@@ -6,23 +6,27 @@ echo    Git Push Helper - ZED Repo
 echo ===============================
 echo.
 
+echo Pulling latest changes from GitHub...
+git pull origin main
+
+echo.
+echo Adding new changes...
 git add .
 
-git diff --cached --quiet
-if %errorlevel%==0 (
-    echo No changes to commit.
-) else (
-    set /p commitmsg=Enter commit message: 
-    if "%commitmsg%"=="" set commitmsg=Update project
-    git commit -m "%commitmsg%"
-)
+echo.
+set /p commitmsg=Enter commit message: 
+if "%commitmsg%"=="" set commitmsg=Update project
 
-echo Pulling latest changes from main...
-git pull origin main --rebase
+echo.
+echo Creating commit...
+git commit -m "%commitmsg%"
 
-echo Pushing to GitHub main branch...
+echo.
+echo Pushing to GitHub...
 git push origin main
 
 echo.
-echo Done! Your changes are on GitHub.
+echo ===============================
+echo   Push Complete Successfully
+echo ===============================
 pause

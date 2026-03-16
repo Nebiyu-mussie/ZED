@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ShieldCheck, Users, Truck, Package, AlertTriangle } from 'lucide-react';
+import { ShieldCheck, Users, Truck, Package, AlertTriangle, Search } from 'lucide-react';
 import { apiFetch, formatCurrency, formatShortDate } from '../lib/api';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
@@ -13,7 +13,10 @@ type CreateAdminForm = {
   role: 'admin' | 'manager' | 'dispatcher';
 };
 
+type TabType = 'overview' | 'orders' | 'drivers' | 'reports' | 'operations' | 'map';
+
 export default function SuperAdminDashboard() {
+  const [activeTab, setActiveTab] = useState<TabType>('overview');
   const [users, setUsers] = useState<any[]>([]);
   const [orders, setOrders] = useState<any[]>([]);
   const [reports, setReports] = useState<any>({});
@@ -41,6 +44,19 @@ export default function SuperAdminDashboard() {
     dispatcher: 'bg-purple-100 text-purple-700',
     driver: 'bg-amber-100 text-amber-700',
     customer: 'bg-gray-100 text-gray-700',
+  };
+
+  const ORDER_STATUS_BADGES: Record<string, string> = {
+    draft: 'bg-gray-100 text-gray-700',
+    confirmed: 'bg-yellow-100 text-yellow-800',
+    driver_assigned: 'bg-blue-100 text-blue-800',
+    picked_up: 'bg-indigo-100 text-indigo-800',
+    in_transit: 'bg-purple-100 text-purple-800',
+    delivered: 'bg-green-100 text-green-800',
+    completed: 'bg-green-50 text-green-700',
+    cancelled: 'bg-red-100 text-red-800',
+    returned: 'bg-orange-100 text-orange-800',
+    failed: 'bg-red-100 text-red-800',
   };
 
   const fetchData = async () => {
@@ -122,49 +138,143 @@ export default function SuperAdminDashboard() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 flex items-center gap-4">
-          <div className="bg-blue-100 p-4 rounded-2xl text-blue-600">
-            <Users className="w-7 h-7" />
-          </div>
-          <div>
-            <p className="text-sm text-gray-500 font-medium">Total Users</p>
-            <p className="text-2xl font-bold text-[#2A1B7A]">{totals.totalUsers}</p>
-          </div>
-        </div>
-        <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 flex items-center gap-4">
-          <div className="bg-indigo-100 p-4 rounded-2xl text-indigo-600">
-            <ShieldCheck className="w-7 h-7" />
-          </div>
-          <div>
-            <p className="text-sm text-gray-500 font-medium">Admins</p>
-            <p className="text-2xl font-bold text-[#2A1B7A]">{totals.admins}</p>
-          </div>
-        </div>
-        <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 flex items-center gap-4">
-          <div className="bg-orange-100 p-4 rounded-2xl text-[#F28C3A]">
-            <Package className="w-7 h-7" />
-          </div>
-          <div>
-            <p className="text-sm text-gray-500 font-medium">Orders</p>
-            <p className="text-2xl font-bold text-[#2A1B7A]">{orders.length}</p>
-          </div>
-        </div>
-        <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 flex items-center gap-4">
-          <div className="bg-green-100 p-4 rounded-2xl text-green-600">
-            <Truck className="w-7 h-7" />
-          </div>
-          <div>
-            <p className="text-sm text-gray-500 font-medium">Drivers</p>
-            <p className="text-2xl font-bold text-[#2A1B7A]">{totals.drivers}</p>
-          </div>
-        </div>
+      <div className="flex gap-4 border-b border-gray-200 overflow-x-auto pb-2">
+        {['overview', 'orders', 'drivers', 'reports', 'operations', 'map'].map((tab) => (
+          <button
+            key={tab}
+            onClick={() => setActiveTab(tab as TabType)}
+            className={`pb-2 font-medium whitespace-nowrap ${activeTab === tab ? 'text-[#2A1B7A] border-b-2 border-[#2A1B7A]' : 'text-gray-500 hover:text-gray-700'}`}
+          >
+            {tab.charAt(0).toUpperCase() + tab.slice(1)}
+          </button>
+        ))}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="bg-white rounded-3xl shadow-sm border border-gray-100 p-6 space-y-4">
+      {activeTab === 'overview' && (
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+          <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 flex items-center gap-4">
+            <div className="bg-blue-100 p-4 rounded-2xl text-blue-600">
+              <Users className="w-7 h-7" />
+            </div>
+            <div>
+              <p className="text-sm text-gray-500 font-medium">Total Users</p>
+              <p className="text-2xl font-bold text-[#2A1B7A]">{totals.totalUsers}</p>
+            </div>
+          </div>
+          <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 flex items-center gap-4">
+            <div className="bg-indigo-100 p-4 rounded-2xl text-indigo-600">
+              <ShieldCheck className="w-7 h-7" />
+            </div>
+            <div>
+              <p className="text-sm text-gray-500 font-medium">Admins</p>
+              <p className="text-2xl font-bold text-[#2A1B7A]">{totals.admins}</p>
+            </div>
+          </div>
+          <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 flex items-center gap-4">
+            <div className="bg-orange-100 p-4 rounded-2xl text-[#F28C3A]">
+              <Package className="w-7 h-7" />
+            </div>
+            <div>
+              <p className="text-sm text-gray-500 font-medium">Orders</p>
+              <p className="text-2xl font-bold text-[#2A1B7A]">{orders.length}</p>
+            </div>
+          </div>
+          <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 flex items-center gap-4">
+            <div className="bg-green-100 p-4 rounded-2xl text-green-600">
+              <Truck className="w-7 h-7" />
+            </div>
+            <div>
+              <p className="text-sm text-gray-500 font-medium">Drivers</p>
+              <p className="text-2xl font-bold text-[#2A1B7A]">{totals.drivers}</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'orders' && (
+        <div className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden">
+          <div className="p-6 border-b border-gray-100 flex items-center justify-between">
+            <h2 className="text-xl font-bold text-[#2A1B7A]">Orders Overview</h2>
+            <div className="text-xs text-gray-500 flex items-center gap-2"><Search className="h-4 w-4" /> Latest activity</div>
+          </div>
+          <div className="divide-y divide-gray-100">
+            {orders.slice(0, 8).map((order) => (
+              <div key={order.id} className="p-6 flex flex-col md:flex-row justify-between gap-3">
+                <div>
+                  <div className="font-semibold text-gray-900">{order.tracking_code || `Order #${order.id}`}</div>
+                  <div className="text-sm text-gray-500">{order.pickup_address} → {order.dropoff_address}</div>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className={`px-2 py-1 rounded-full text-xs font-semibold uppercase ${ORDER_STATUS_BADGES[order.status] || 'bg-gray-100 text-gray-700'}`}>
+                    {order.status.replace('_', ' ')}
+                  </span>
+                  <span className="text-sm text-gray-600">{formatCurrency(order.total || 0)}</span>
+                </div>
+              </div>
+            ))}
+            {orders.length === 0 && <div className="p-6 text-center text-gray-500">No orders yet.</div>}
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'drivers' && (
+        <div className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden">
+          <div className="p-6 border-b border-gray-100">
+            <h2 className="text-xl font-bold text-[#2A1B7A]">Driver Directory</h2>
+          </div>
+          <div className="divide-y divide-gray-100">
+            {users.filter((u) => u.role === 'driver').map((driver) => (
+              <div key={driver.id} className="p-6 flex items-center justify-between">
+                <div>
+                  <div className="font-semibold text-gray-900">{driver.name}</div>
+                  <div className="text-sm text-gray-500">{driver.email || '—'}</div>
+                </div>
+                <span className={`px-2 py-1 rounded-full text-xs font-semibold uppercase ${ACTIVE_BADGES[driver.is_active === false ? 'inactive' : 'active']}`}>
+                  {driver.is_active === false ? 'inactive' : 'active'}
+                </span>
+              </div>
+            ))}
+            {users.filter((u) => u.role === 'driver').length === 0 && (
+              <div className="p-6 text-center text-gray-500">No drivers found.</div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'reports' && (
+        <div className="bg-gradient-to-br from-[#2A1B7A] to-[#1D144F] text-white rounded-3xl shadow-lg p-8">
           <div className="flex items-center justify-between">
-            <h2 className="text-xl font-bold text-[#2A1B7A]">Admin Accounts</h2>
+            <h2 className="text-2xl font-bold">Revenue Overview</h2>
+            <span className="text-sm text-white/70">System performance</span>
+          </div>
+          <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="bg-white/10 rounded-2xl p-6">
+              <p className="text-sm text-white/70">Total Revenue</p>
+              <p className="text-3xl font-bold">{formatCurrency(reports.revenue || 0)}</p>
+            </div>
+            <div className="bg-white/10 rounded-2xl p-6">
+              <p className="text-sm text-white/70">Completed Orders</p>
+              <p className="text-3xl font-bold">{reports.completedOrders || 0}</p>
+            </div>
+            <div className="bg-white/10 rounded-2xl p-6">
+              <p className="text-sm text-white/70">Late Deliveries</p>
+              <p className="text-3xl font-bold text-red-200">{reports.late || 0}</p>
+            </div>
+            <div className="bg-white/10 rounded-2xl p-6">
+              <p className="text-sm text-white/70">At Risk</p>
+              <p className="text-3xl font-bold text-orange-200">{reports.atRisk || 0}</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'operations' && (
+        <div className="bg-white rounded-3xl shadow-sm border border-gray-100 p-6 space-y-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-2xl font-bold text-[#2A1B7A]">Admin Accounts</h2>
+              <p className="text-sm text-gray-500">Activate, deactivate, and create admins.</p>
+            </div>
             <Button variant="outline" size="sm" onClick={() => setShowCreateForm((prev) => !prev)}>
               {showCreateForm ? 'Close Form' : 'Add Admin / Manager'}
             </Button>
@@ -240,44 +350,24 @@ export default function SuperAdminDashboard() {
             </table>
           </div>
         </div>
+      )}
 
+      {activeTab === 'map' && (
         <div className="bg-white rounded-3xl shadow-sm border border-gray-100 p-6 space-y-4">
-          <h2 className="text-xl font-bold text-[#2A1B7A]">Revenue Overview</h2>
-          <div className="space-y-3 text-sm text-gray-600">
-            <div className="flex justify-between">
-              <span>Total Revenue</span>
-              <span className="font-semibold text-[#2A1B7A]">{formatCurrency(reports.revenue || 0)}</span>
-            </div>
-            <div className="flex justify-between">
-              <span>Completed Orders</span>
-              <span className="font-semibold">{reports.completedOrders || 0}</span>
-            </div>
-            <div className="flex justify-between">
-              <span>Late Deliveries</span>
-              <span className="font-semibold text-red-500">{reports.late || 0}</span>
-            </div>
-            <div className="flex justify-between">
-              <span>At Risk</span>
-              <span className="font-semibold text-orange-500">{reports.atRisk || 0}</span>
-            </div>
+          <h2 className="text-xl font-bold text-[#2A1B7A] flex items-center gap-2">
+            <AlertTriangle className="h-5 w-5 text-[#F28C3A]" /> Audit & Fraud Watch
+          </h2>
+          <div className="space-y-2 text-sm text-gray-600">
+            {auditLogs.map((log) => (
+              <div key={log.id} className="flex justify-between border-b border-gray-100 pb-2">
+                <span>{log.action} • {log.entity_type} #{log.entity_id} • {log.actor_role || 'system'}</span>
+                <span className="text-xs text-gray-400">{formatShortDate(log.created_at)}</span>
+              </div>
+            ))}
+            {auditLogs.length === 0 && <p className="text-sm text-gray-400">No audit entries yet.</p>}
           </div>
         </div>
-      </div>
-
-      <div className="bg-white rounded-3xl shadow-sm border border-gray-100 p-6 space-y-4">
-        <h2 className="text-xl font-bold text-[#2A1B7A] flex items-center gap-2">
-          <AlertTriangle className="h-5 w-5 text-[#F28C3A]" /> Audit & Fraud Watch
-        </h2>
-        <div className="space-y-2 text-sm text-gray-600">
-          {auditLogs.map((log) => (
-            <div key={log.id} className="flex justify-between border-b border-gray-100 pb-2">
-              <span>{log.action} • {log.entity_type} #{log.entity_id} • {log.actor_role || 'system'}</span>
-              <span className="text-xs text-gray-400">{formatShortDate(log.created_at)}</span>
-            </div>
-          ))}
-          {auditLogs.length === 0 && <p className="text-sm text-gray-400">No audit entries yet.</p>}
-        </div>
-      </div>
+      )}
     </div>
   );
 }
