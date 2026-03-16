@@ -2,7 +2,9 @@ import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
+import { PasswordInput } from '../components/ui/PasswordInput';
 import { Package } from 'lucide-react';
+import { apiFetch } from '../lib/api';
 
 export default function Register() {
   const navigate = useNavigate();
@@ -10,12 +12,16 @@ export default function Register() {
     name: '',
     email: '',
     password: '',
-    role: 'customer',
-    phone: '',
-    vehicleType: '',
   });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const dashboardForRole = (role: string) => {
+    if (role === 'super_admin') return '/super-admin-dashboard';
+    if (role === 'admin' || role === 'manager') return '/admin-dashboard';
+    if (role === 'dispatcher') return '/dispatcher-dashboard';
+    if (role === 'driver') return '/driver-dashboard';
+    return '/customer-dashboard';
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -23,24 +29,17 @@ export default function Register() {
     setLoading(true);
 
     try {
-      const res = await fetch('/api/auth/register', {
+      const data = await apiFetch('/api/auth/register', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(formData),
       });
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        throw new Error(data.error || 'Registration failed');
-      }
 
       localStorage.setItem('token', data.token);
       localStorage.setItem('user', JSON.stringify(data.user));
 
-      navigate(`/${data.user.role}-dashboard`);
+      navigate(dashboardForRole(data.user.role));
     } catch (err: any) {
-      setError(err.message);
+      setError(err?.error || err?.message || 'Registration failed');
     } finally {
       setLoading(false);
     }
@@ -90,8 +89,7 @@ export default function Register() {
 
           <div className="space-y-2">
             <label className="text-sm font-medium text-gray-700 ml-1">Password</label>
-            <Input
-              type="password"
+            <PasswordInput
               required
               value={formData.password}
               onChange={(e) => setFormData({ ...formData, password: e.target.value })}
@@ -100,73 +98,9 @@ export default function Register() {
             />
           </div>
 
-          <div className="space-y-3">
-            <label className="text-sm font-medium text-gray-700 ml-1">I am a...</label>
-            <div className="grid grid-cols-3 gap-4">
-              <button
-                type="button"
-                onClick={() => setFormData({ ...formData, role: 'customer' })}
-                className={`p-4 rounded-2xl border-2 text-center transition-all ${
-                  formData.role === 'customer'
-                    ? 'border-[#F28C3A] bg-[#F28C3A]/5 text-[#F28C3A] font-bold'
-                    : 'border-gray-200 text-gray-500 hover:border-gray-300'
-                }`}
-              >
-                Customer
-              </button>
-              <button
-                type="button"
-                onClick={() => setFormData({ ...formData, role: 'driver' })}
-                className={`p-4 rounded-2xl border-2 text-center transition-all ${
-                  formData.role === 'driver'
-                    ? 'border-[#2A1B7A] bg-[#2A1B7A]/5 text-[#2A1B7A] font-bold'
-                    : 'border-gray-200 text-gray-500 hover:border-gray-300'
-                }`}
-              >
-                Driver
-              </button>
-              <button
-                type="button"
-                onClick={() => setFormData({ ...formData, role: 'admin' })}
-                className={`p-4 rounded-2xl border-2 text-center transition-all ${
-                  formData.role === 'admin'
-                    ? 'border-green-600 bg-green-50 text-green-600 font-bold'
-                    : 'border-gray-200 text-gray-500 hover:border-gray-300'
-                }`}
-              >
-                Admin
-              </button>
-            </div>
+          <div className="bg-amber-50 text-amber-700 p-4 rounded-xl text-sm border border-amber-100">
+            Customer registration only. Staff accounts are created by the system administrator.
           </div>
-
-          {formData.role === 'driver' && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 pt-4 border-t border-gray-100">
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-gray-700 ml-1">Phone Number</label>
-                <Input
-                  required
-                  value={formData.phone}
-                  onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                  placeholder="+251 911 123456"
-                  className="h-12 rounded-xl"
-                />
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-gray-700 ml-1">Vehicle Type</label>
-                <select
-                  required
-                  value={formData.vehicleType}
-                  onChange={(e) => setFormData({ ...formData, vehicleType: e.target.value })}
-                  className="flex h-12 w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F28C3A]"
-                >
-                  <option value="">Select Vehicle</option>
-                  <option value="motorcycle">Motorcycle</option>
-                  <option value="car">Car</option>
-                  <option value="van">Van / Truck</option>
-                </select>
-              </div>
-            </div>
-          )}
 
           <Button type="submit" className="w-full h-14 text-lg rounded-2xl mt-8" disabled={loading}>
             {loading ? 'Creating Account...' : 'Create Account'}

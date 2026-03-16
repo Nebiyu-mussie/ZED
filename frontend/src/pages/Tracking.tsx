@@ -1,16 +1,28 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { Map, Package, Truck, CheckCircle, Clock, Phone, MessageSquare, Shield, AlertCircle, X, Send } from 'lucide-react';
+import { Map as MapIcon, Package, CheckCircle, Clock, Phone, MessageSquare, Shield, AlertCircle } from 'lucide-react';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { io, Socket } from 'socket.io-client';
 import { apiFetch, formatCurrency, formatShortDate } from '../lib/api';
+import { MapContainer, TileLayer, Marker, Popup, Polyline } from 'react-leaflet';
+import L from 'leaflet';
+import markerIcon2x from 'leaflet/dist/images/marker-icon-2x.png';
+import markerIcon from 'leaflet/dist/images/marker-icon.png';
+import markerShadow from 'leaflet/dist/images/marker-shadow.png';
+
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: markerIcon2x,
+  iconUrl: markerIcon,
+  shadowUrl: markerShadow,
+});
 
 export default function Tracking() {
   const { id } = useParams<{ id: string }>();
   const [loading, setLoading] = useState(true);
   const [order, setOrder] = useState<any>(null);
   const [events, setEvents] = useState<any[]>([]);
+  const [driverLocation, setDriverLocation] = useState<{ lat: number; lng: number; updated_at?: string } | null>(null);
 
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [messages, setMessages] = useState<{ sender: string; text: string; time: string }[]>([]);
@@ -24,12 +36,6 @@ export default function Tracking() {
   useEffect(() => {
     socketRef.current = io();
 
-    socketRef.current.on('connect', () => {
-      if (id) {
-        socketRef.current?.emit('join_delivery', id);
-      }
-    });
-
     socketRef.current.on('receive_message', (message: { sender: string; text: string; time: string }) => {
       setMessages((prev) => [...prev, message]);
     });
@@ -38,6 +44,11 @@ export default function Tracking() {
       if (updatedOrder.id?.toString() === id) {
         setOrder(updatedOrder);
       }
+    });
+
+    socketRef.current.on('driver_location', (payload: any) => {
+      if (!payload || typeof payload.lat !== 'number' || typeof payload.lng !== 'number') return;
+      setDriverLocation({ lat: payload.lat, lng: payload.lng, updated_at: payload.updated_at });
     });
 
     return () => {
@@ -67,9 +78,13 @@ export default function Tracking() {
   useEffect(() => {
     const load = async () => {
       try {
-        const data = await apiFetch(`/api/orders/${id}`);
+        const data = await apiFetch(`/api/track/${id}`);
         setOrder(data.order);
         setEvents(data.events || []);
+        setDriverLocation(data.driverLocation || null);
+        if (data.order?.id) {
+          socketRef.current?.emit('join_delivery', data.order.id);
+        }
       } catch (error) {
         setOrder(null);
       } finally {
@@ -110,13 +125,64 @@ export default function Tracking() {
       </div>
 
       <div className="bg-gray-200 h-64 md:h-96 rounded-3xl overflow-hidden relative border border-gray-200 shadow-sm">
-        <div className="absolute inset-0 flex items-center justify-center bg-gray-100">
-          <div className="text-center space-y-2">
-            <Map className="w-12 h-12 text-gray-400 mx-auto" />
-            <p className="text-gray-500 font-medium">Live Map Placeholder</p>
-            <p className="text-xs text-gray-400">Driver coordinates are available in Admin Live Map.</p>
-          </div>
-        </div>
+        {(() => {
+          const pickupLat = Number(order?.pickup_lat);
+          const pickupLng = Number(order?.pickup_lng);
+          const dropoffLat = Number(order?.dropoff_lat);
+          const dropoffLng = Number(order?.dropoff_lng);
+          const driverLat = driverLocation ? Number(driverLocation.lat) : NaN;
+          const driverLng = driverLocation ? Number(driverLocation.lng) : NaN;
+
+          const hasPickup = Number.isFinite(pickupLat) && Number.isFinite(pickupLng);
+          const hasDropoff = Number.isFinite(dropoffLat) && Number.isFinite(dropoffLng);
+          const hasDriver = Number.isFinite(driverLat) && Number.isFinite(driverLng);
+
+          const center: [number, number] = hasDriver
+            ? [driverLat, driverLng]
+            : hasPickup
+            ? [pickupLat, pickupLng]
+            : hasDropoff
+            ? [dropoffLat, dropoffLng]
+            : [9.03, 38.74];
+
+          return (
+            <>
+              <MapContainer center={center} zoom={13} scrollWheelZoom={false} className="h-full w-full">
+                <TileLayer
+                  attribution="&copy; OpenStreetMap contributors"
+                  url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                />
+                {hasPickup && (
+                  <Marker position={[pickupLat, pickupLng]}>
+                    <Popup>Pickup location</Popup>
+                  </Marker>
+                )}
+                {hasDropoff && (
+                  <Marker position={[dropoffLat, dropoffLng]}>
+                    <Popup>Drop-off location</Popup>
+                  </Marker>
+                )}
+                {hasDriver && (
+                  <Marker position={[driverLat, driverLng]}>
+                    <Popup>Driver is here</Popup>
+                  </Marker>
+                )}
+                {hasPickup && hasDropoff && (
+                  <Polyline positions={[[pickupLat, pickupLng], [dropoffLat, dropoffLng]]} pathOptions={{ color: '#2A1B7A' }} />
+                )}
+              </MapContainer>
+              {!hasPickup && !hasDropoff && !hasDriver && (
+                <div className="absolute inset-0 flex items-center justify-center bg-gray-100">
+                  <div className="text-center space-y-2">
+                    <MapIcon className="w-12 h-12 text-gray-400 mx-auto" />
+                    <p className="text-gray-500 font-medium">Waiting for coordinates...</p>
+                    <p className="text-xs text-gray-400">Once a driver is assigned, live tracking appears here.</p>
+                  </div>
+                </div>
+              )}
+            </>
+          );
+        })()}
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">

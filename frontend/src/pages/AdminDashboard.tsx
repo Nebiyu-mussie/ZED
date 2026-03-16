@@ -4,10 +4,32 @@ import { formatShortDate, formatCurrency, apiFetch } from '../lib/api';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
+import { PasswordInput } from '../components/ui/PasswordInput';
 import { useToast } from '../components/ui/Toast';
 import { getSocket } from '../lib/socket';
 
 type TabType = 'overview' | 'orders' | 'drivers' | 'customers' | 'reports' | 'operations' | 'map';
+
+const ORDER_STATUS_BADGES: Record<string, string> = {
+  draft: 'bg-gray-100 text-gray-700',
+  confirmed: 'bg-yellow-100 text-yellow-800',
+  driver_assigned: 'bg-blue-100 text-blue-800',
+  picked_up: 'bg-indigo-100 text-indigo-800',
+  in_transit: 'bg-purple-100 text-purple-800',
+  delivered: 'bg-green-100 text-green-800',
+  completed: 'bg-green-50 text-green-700',
+  cancelled: 'bg-red-100 text-red-800',
+  returned: 'bg-orange-100 text-orange-800',
+  failed: 'bg-red-100 text-red-800',
+};
+
+const DRIVER_STATUS_BADGES: Record<string, string> = {
+  approved: 'bg-green-100 text-green-700',
+  pending: 'bg-yellow-100 text-yellow-700',
+  rejected: 'bg-red-100 text-red-700',
+};
+
+const statusBadge = (status?: string, map?: Record<string, string>) => map?.[status || ''] || 'bg-gray-100 text-gray-700';
 
 export default function AdminDashboard() {
   const [activeTab, setActiveTab] = useState<TabType>('overview');
@@ -23,6 +45,7 @@ export default function AdminDashboard() {
   const [searchResults, setSearchResults] = useState<any>({ orders: [], users: [] });
   const [promoForm, setPromoForm] = useState({ code: '', discountType: 'flat', amount: 0, minSpend: 0, maxUses: 0, perUserLimit: 0 });
   const [pricingForm, setPricingForm] = useState({ zoneName: '', serviceType: 'same_day', baseFare: 80, perKm: 12, weightRate: 6, surgeMultiplier: 1 });
+  const [createUserForm, setCreateUserForm] = useState({ name: '', email: '', password: '', role: 'dispatcher', phone: '', vehicleType: 'motorcycle' });
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const toast = useToast();
@@ -89,7 +112,7 @@ export default function AdminDashboard() {
     }
   };
 
-  const assignDriver = async (orderId: number, driverId: number) => {
+  const assignDriver = async (orderId: string, driverId: string) => {
     try {
       await apiFetch(`/api/orders/${orderId}/assign`, {
         method: 'POST',
@@ -149,6 +172,20 @@ export default function AdminDashboard() {
       fetchData();
     } catch (error) {
       toast.push({ title: 'Unable to create pricing rule', variant: 'error' });
+    }
+  };
+
+  const createStaffUser = async () => {
+    try {
+      await apiFetch('/api/admin/users', {
+        method: 'POST',
+        body: JSON.stringify(createUserForm),
+      });
+      toast.push({ title: 'Account created', variant: 'success' });
+      setCreateUserForm({ name: '', email: '', password: '', role: 'dispatcher', phone: '', vehicleType: 'motorcycle' });
+      fetchData();
+    } catch (error: any) {
+      toast.push({ title: 'Unable to create account', description: error.error || '', variant: 'error' });
     }
   };
 
@@ -240,7 +277,9 @@ export default function AdminDashboard() {
                 <div className="flex justify-between items-center">
                   <p className="text-sm text-gray-500">{order.pickup_address} → {order.dropoff_address}</p>
                     <div className="flex items-center gap-2">
-                      <span className="text-xs font-bold uppercase text-gray-500 bg-gray-100 px-2 py-1 rounded-md">{order.status.replace('_', ' ')}</span>
+                  <span className={`text-xs font-bold uppercase px-2 py-1 rounded-md ${statusBadge(order.status, ORDER_STATUS_BADGES)}`}>
+                    {order.status.replace('_', ' ')}
+                  </span>
                       <Button onClick={() => navigate(`/orders/${order.id}`)} size="sm" className="bg-[#2A1B7A] hover:bg-[#2A1B7A]/90 text-white h-6 px-2 text-xs">
                         View
                       </Button>
@@ -313,7 +352,7 @@ export default function AdminDashboard() {
                 <td className="p-4 text-sm text-gray-600">Customer</td>
                 <td className="p-4 text-sm text-gray-600 max-w-xs truncate">{order.pickup_address} → {order.dropoff_address}</td>
                 <td className="p-4">
-                  <span className="px-2 py-1 rounded-full text-xs font-bold uppercase tracking-wider bg-gray-100 text-gray-700">
+                  <span className={`px-2 py-1 rounded-full text-xs font-bold uppercase tracking-wider ${statusBadge(order.status, ORDER_STATUS_BADGES)}`}>
                     {order.status.replace('_', ' ')}
                   </span>
                   {order.sla_status && (
@@ -326,7 +365,7 @@ export default function AdminDashboard() {
                 <td className="p-4">
                   <select
                     className="rounded-xl border border-gray-200 px-2 py-1 text-xs"
-                    onChange={(e) => assignDriver(order.id, Number(e.target.value))}
+                    onChange={(e) => assignDriver(order.id, e.target.value)}
                     value={order.driver_id || ''}
                   >
                     <option value="">Assign</option>
@@ -379,8 +418,16 @@ export default function AdminDashboard() {
                   <div className="font-semibold text-gray-900">{driver.name}</div>
                   <div className="text-xs text-gray-400">{driver.email}</div>
                 </td>
-                <td className="p-4 text-sm text-gray-600">{driver.status}</td>
-                <td className="p-4 text-sm text-gray-600">{driver.verification_status || 'pending'}</td>
+                <td className="p-4 text-sm">
+                  <span className={`px-2 py-1 rounded-full text-xs font-semibold uppercase ${statusBadge(driver.status, DRIVER_STATUS_BADGES)}`}>
+                    {driver.status}
+                  </span>
+                </td>
+                <td className="p-4 text-sm">
+                  <span className={`px-2 py-1 rounded-full text-xs font-semibold uppercase ${statusBadge(driver.verification_status || 'pending', DRIVER_STATUS_BADGES)}`}>
+                    {driver.verification_status || 'pending'}
+                  </span>
+                </td>
                 <td className="p-4 text-sm text-gray-600">{driver.is_online ? 'Online' : 'Offline'}</td>
                 <td className="p-4 text-sm text-gray-600">{Math.round((driver.accept_rate || 1) * 100)}%</td>
                 <td className="p-4">
@@ -424,6 +471,38 @@ export default function AdminDashboard() {
 
   const renderOperations = () => (
     <div className="space-y-8">
+      <div className="bg-white rounded-3xl shadow-sm border border-gray-100 p-6 space-y-4">
+        <h2 className="text-xl font-bold text-[#2A1B7A]">Create Staff Account</h2>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <Input placeholder="Full name" value={createUserForm.name} onChange={(e) => setCreateUserForm({ ...createUserForm, name: e.target.value })} />
+          <Input placeholder="Email" type="email" value={createUserForm.email} onChange={(e) => setCreateUserForm({ ...createUserForm, email: e.target.value })} />
+          <PasswordInput placeholder="Password" value={createUserForm.password} onChange={(e) => setCreateUserForm({ ...createUserForm, password: e.target.value })} />
+          <select
+            className="h-10 rounded-xl border border-gray-300 px-3"
+            value={createUserForm.role}
+            onChange={(e) => setCreateUserForm({ ...createUserForm, role: e.target.value })}
+          >
+            <option value="dispatcher">Dispatcher</option>
+            <option value="driver">Driver</option>
+          </select>
+          <Input placeholder="Phone (optional)" value={createUserForm.phone} onChange={(e) => setCreateUserForm({ ...createUserForm, phone: e.target.value })} />
+          {createUserForm.role === 'driver' ? (
+            <select
+              className="h-10 rounded-xl border border-gray-300 px-3"
+              value={createUserForm.vehicleType}
+              onChange={(e) => setCreateUserForm({ ...createUserForm, vehicleType: e.target.value })}
+            >
+              <option value="motorcycle">Motorcycle</option>
+              <option value="car">Car</option>
+              <option value="van">Van / Truck</option>
+            </select>
+          ) : (
+            <div className="h-10" />
+          )}
+        </div>
+        <Button onClick={createStaffUser} className="bg-[#2A1B7A] hover:bg-[#2A1B7A]/90">Create Account</Button>
+      </div>
+
       <div className="bg-white rounded-3xl shadow-sm border border-gray-100 p-6 space-y-4">
         <h2 className="text-xl font-bold text-[#2A1B7A] flex items-center gap-2">
           <Search className="h-5 w-5 text-[#F28C3A]" /> Global Search

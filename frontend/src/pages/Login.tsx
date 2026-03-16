@@ -2,14 +2,23 @@ import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
-import { Package } from 'lucide-react';
+import { Eye, EyeOff, Package } from 'lucide-react';
+import { apiFetch } from '../lib/api';
 
 export default function Login() {
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const dashboardForRole = (role: string) => {
+    if (role === 'super_admin') return '/super-admin-dashboard';
+    if (role === 'admin' || role === 'manager') return '/admin-dashboard';
+    if (role === 'dispatcher') return '/dispatcher-dashboard';
+    if (role === 'driver') return '/driver-dashboard';
+    return '/customer-dashboard';
+  };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -17,24 +26,17 @@ export default function Login() {
     setLoading(true);
 
     try {
-      const res = await fetch('/api/auth/login', {
+      const data = await apiFetch('/api/auth/login', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),
       });
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        throw new Error(data.error || 'Login failed');
-      }
 
       localStorage.setItem('token', data.token);
       localStorage.setItem('user', JSON.stringify(data.user));
 
-      navigate(`/${data.user.role}-dashboard`);
+      navigate(dashboardForRole(data.user.role));
     } catch (err: any) {
-      setError(err.message);
+      setError(err?.error || err?.message || 'Login failed');
     } finally {
       setLoading(false);
     }
@@ -71,14 +73,24 @@ export default function Login() {
           </div>
           <div className="space-y-2">
             <label className="text-sm font-medium text-gray-700 ml-1">Password</label>
-            <Input
-              type="password"
-              required
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="••••••••"
-              className="h-12 rounded-xl"
-            />
+            <div className="relative">
+              <Input
+                type={showPassword ? 'text' : 'password'}
+                required
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••"
+                className="h-12 rounded-xl pr-12"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword((prev) => !prev)}
+                className="absolute inset-y-0 right-3 flex items-center text-gray-400 hover:text-gray-600"
+                aria-label={showPassword ? 'Hide password' : 'Show password'}
+              >
+                {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+              </button>
+            </div>
           </div>
           <Button type="submit" className="w-full h-12 text-lg rounded-xl mt-4" disabled={loading}>
             {loading ? 'Signing in...' : 'Sign In'}

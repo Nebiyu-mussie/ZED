@@ -26,6 +26,9 @@ export default function OrderDetails() {
   const navigate = useNavigate();
   const toast = useToast();
   const user = JSON.parse(localStorage.getItem('user') || '{}');
+  const isAdmin = ['admin', 'manager', 'super_admin'].includes(user.role);
+  const isDispatcher = user.role === 'dispatcher';
+  const isStaff = isAdmin || isDispatcher;
 
   const [order, setOrder] = useState<any>(null);
   const [events, setEvents] = useState<any[]>([]);
@@ -50,7 +53,7 @@ export default function OrderDetails() {
       setCustomer(data.customer);
       setTickets(data.tickets || []);
       setRatings(data.ratings || []);
-      if (user.role === 'admin') {
+      if (isStaff) {
         const driverList = await apiFetch('/api/drivers');
         setDrivers(driverList);
       }
@@ -157,7 +160,7 @@ export default function OrderDetails() {
     }
   };
 
-  const assignDriver = async (driverId: number) => {
+  const assignDriver = async (driverId: string) => {
     try {
       await apiFetch(`/api/orders/${order.id}/assign`, {
         method: 'POST',
@@ -320,12 +323,12 @@ export default function OrderDetails() {
             </div>
           )}
 
-          {user.role === 'admin' && (
+          {isStaff && (
             <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 space-y-4">
-              <h3 className="font-semibold text-[#2A1B7A]">Admin Actions</h3>
+              <h3 className="font-semibold text-[#2A1B7A]">Staff Actions</h3>
               <select
                 className="w-full h-11 rounded-xl border border-gray-300 px-3 text-sm"
-                onChange={(e) => assignDriver(Number(e.target.value))}
+                onChange={(e) => assignDriver(e.target.value)}
                 defaultValue=""
               >
                 <option value="" disabled>Assign driver</option>
@@ -341,7 +344,7 @@ export default function OrderDetails() {
             </div>
           )}
 
-          {user.role !== 'admin' && (
+          {!isStaff && (
             <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 space-y-4">
               <h3 className="font-semibold text-[#2A1B7A] flex items-center gap-2"><AlertTriangle className="h-5 w-5" /> Issue with delivery</h3>
               <select

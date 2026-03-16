@@ -4,6 +4,7 @@ import {Provider} from 'react-redux';
 import {store} from './store';
 import App from './App.tsx';
 import { ToastProvider } from './components/ui/Toast';
+import 'leaflet/dist/leaflet.css';
 import './index.css';
 
 createRoot(document.getElementById('root')!).render(

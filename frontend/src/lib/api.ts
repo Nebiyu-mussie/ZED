@@ -10,9 +10,16 @@ export const apiFetch = async (path: string, options: RequestInit = {}) => {
 
   const res = await fetch(path, { ...options, headers });
   const text = await res.text();
-  const data = text ? JSON.parse(text) : null;
+  let data: any = null;
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = null;
+    }
+  }
   if (!res.ok) {
-    throw data || { error: 'Request failed' };
+    throw data || { error: res.statusText || 'Request failed' };
   }
   return data;
 };
@@ -22,4 +29,3 @@ export const formatCurrency = (value: number) =>
 
 export const formatShortDate = (value: string | number | Date) =>
   new Date(value).toLocaleDateString('en-ET', { month: 'short', day: 'numeric', year: 'numeric' });
-

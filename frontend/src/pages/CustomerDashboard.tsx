@@ -207,10 +207,14 @@ export default function CustomerDashboard() {
                   <Package className="h-8 w-8 text-[#F28C3A]" />
                   <span className="font-medium text-[#2A1B7A]">Send Parcel</span>
                 </button>
-                <Link to="/store" className="p-4 bg-[#2A1B7A]/10 rounded-2xl flex flex-col items-center text-center gap-2 hover:bg-[#2A1B7A]/20 transition-colors">
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('history')}
+                  className="p-4 bg-[#2A1B7A]/10 rounded-2xl flex flex-col items-center text-center gap-2 hover:bg-[#2A1B7A]/20 transition-colors"
+                >
                   <Store className="h-8 w-8 text-[#2A1B7A]" />
-                  <span className="font-medium text-[#2A1B7A]">ZED Store</span>
-                </Link>
+                  <span className="font-medium text-[#2A1B7A]">Order History</span>
+                </button>
               </div>
             </div>
 

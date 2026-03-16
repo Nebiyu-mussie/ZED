@@ -12,11 +12,16 @@ import Register from './pages/Register';
 import CustomerDashboard from './pages/CustomerDashboard';
 import DriverDashboard from './pages/DriverDashboard';
 import AdminDashboard from './pages/AdminDashboard';
-import Store from './pages/Store';
+import SuperAdminDashboard from './pages/SuperAdminDashboard';
+import DispatcherDashboard from './pages/DispatcherDashboard';
 import Tracking from './pages/Tracking';
 import Unauthorized from './pages/Unauthorized';
 import OrderDetails from './pages/OrderDetails';
 import { apiFetch } from './lib/api';
+
+const ADMIN_ROLES = ['admin', 'manager'];
+const SUPER_ADMIN_ROLES = ['super_admin'];
+const DISPATCHER_ROLES = ['dispatcher'];
 
 // Simple protected route wrapper
 const ProtectedRoute = ({ children, allowedRoles }: { children: React.ReactNode, allowedRoles: string[] }) => {
@@ -57,10 +62,9 @@ export default function App() {
           <Route index element={<Landing />} />
           <Route path="login" element={<Login />} />
           <Route path="register" element={<Register />} />
-          <Route path="store" element={<Store />} />
           <Route path="tracking/:id" element={<Tracking />} />
           <Route path="orders/:id" element={
-            <ProtectedRoute allowedRoles={['customer', 'driver', 'admin']}>
+            <ProtectedRoute allowedRoles={['customer', 'driver', ...ADMIN_ROLES, ...SUPER_ADMIN_ROLES, ...DISPATCHER_ROLES]}>
               <OrderDetails />
             </ProtectedRoute>
           } />
@@ -71,16 +75,28 @@ export default function App() {
               <CustomerDashboard />
             </ProtectedRoute>
           } />
-          
+
           <Route path="driver-dashboard" element={
             <ProtectedRoute allowedRoles={['driver']}>
               <DriverDashboard />
             </ProtectedRoute>
           } />
+
+          <Route path="dispatcher-dashboard" element={
+            <ProtectedRoute allowedRoles={DISPATCHER_ROLES}>
+              <DispatcherDashboard />
+            </ProtectedRoute>
+          } />
           
           <Route path="admin-dashboard" element={
-            <ProtectedRoute allowedRoles={['admin']}>
+            <ProtectedRoute allowedRoles={ADMIN_ROLES}>
               <AdminDashboard />
+            </ProtectedRoute>
+          } />
+
+          <Route path="super-admin-dashboard" element={
+            <ProtectedRoute allowedRoles={SUPER_ADMIN_ROLES}>
+              <SuperAdminDashboard />
             </ProtectedRoute>
           } />
         </Route>

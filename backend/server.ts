@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import express from 'express';
 import { createServer as createViteServer } from 'vite';
 import bcrypt from 'bcryptjs';
@@ -38,6 +39,9 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const JWT_SECRET = process.env.JWT_SECRET || 'zemen-express-secret-key';
+const ADMIN_ROLES = ['admin', 'manager'] as const;
+const SUPER_ADMIN_ROLES = ['super_admin'] as const;
+const ALLOW_OUT_OF_ZONE = process.env.ALLOW_OUT_OF_ZONE === 'true';
 
 const ORDER_STATUSES = [
   'draft',
@@ -72,7 +76,8 @@ const validatePhone = (phone: string) => /^\+?\d[\d\s-]{7,}$/.test(phone);
 
 const MAX_DISPATCH_ATTEMPTS = 6;
 const MAX_ACTIVE_OFFERS_PER_DRIVER = 2;
-const DRIVER_ARRIVAL_RADIUS_KM = 0.2;
+const DRIVER_ARRIVAL_RADIUS_KM = Number(process.env.DRIVER_ARRIVAL_RADIUS_KM || 0.2);
+const ENFORCE_DRIVER_PROXIMITY = process.env.ENFORCE_DRIVER_PROXIMITY !== 'false';
 
 const haversineKm = (lat1: number, lng1: number, lat2: number, lng2: number) => {
   const toRad = (deg: number) => (deg * Math.PI) / 180;
@@ -170,6 +175,10 @@ const inferZoneFromAddress = async (pickup?: string, dropoff?: string) => {
 };
 
 const checkCoverage = async (pickupLat?: number, pickupLng?: number, dropoffLat?: number, dropoffLng?: number) => {
+  if (ALLOW_OUT_OF_ZONE) {
+    const fallbackZone = await Zone.findOne({ status: 'active' }).sort({ name: 1 }).lean();
+    return { ok: true, zone: fallbackZone?.name || null };
+  }
   const pickupZone = await getZoneForCoords(pickupLat, pickupLng);
   const dropoffZone = await getZoneForCoords(dropoffLat, dropoffLng);
   if (pickupZone && dropoffZone) {
@@ -270,6 +279,64 @@ async function startServer() {
         { name: 'Smart Watch Series 5', description: 'Fitness tracking, heart rate monitor, and notifications.', price: 7000, image_url: 'https://picsum.photos/seed/watch/400/300', stock: 20, created_at: new Date() },
       ]);
     }
+
+    const superAdminPassword = process.env.SUPER_ADMIN_PASSWORD || 'Admin1234!';
+    const superAdminName = process.env.SUPER_ADMIN_NAME || 'Trinity Stack Admin';
+    const superAdminEmails = (process.env.SUPER_ADMIN_EMAILS || process.env.SUPER_ADMIN_EMAIL || 'admin@zemen.local')
+      .split(',')
+      .map((email) => email.trim())
+      .filter(Boolean);
+
+    const deriveName = (email: string) => {
+      const local = email.split('@')[0] || '';
+      const cleaned = local.replace(/[._-]+/g, ' ').trim();
+      if (!cleaned) return superAdminName;
+      return cleaned.replace(/\b\w/g, (char) => char.toUpperCase());
+    };
+
+    for (const email of superAdminEmails) {
+      const existing = await User.findOne({ email }).lean();
+      if (existing) continue;
+      const hashedPassword = await bcrypt.hash(superAdminPassword, 10);
+      await User.create({
+        name: superAdminEmails.length > 1 ? deriveName(email) : superAdminName,
+        email,
+        password: hashedPassword,
+        role: 'super_admin',
+        phone: '',
+        created_at: new Date(),
+        updated_at: new Date(),
+      });
+    }
+
+    const seedPassword = process.env.SEED_USER_PASSWORD || 'Zed1234!';
+    const seedUsers = [
+      { name: 'ZED Manager', email: process.env.SEED_MANAGER_EMAIL || 'manager@zed.local', role: 'manager' },
+      { name: 'ZED Dispatcher', email: process.env.SEED_DISPATCHER_EMAIL || 'dispatcher@zed.local', role: 'dispatcher' },
+      { name: 'ZED Driver', email: process.env.SEED_DRIVER_EMAIL || 'driver@zed.local', role: 'driver' },
+      { name: 'ZED Customer', email: process.env.SEED_CUSTOMER_EMAIL || 'customer@zed.local', role: 'customer' },
+    ];
+
+    for (const seedUser of seedUsers) {
+      const existing = await User.findOne({ email: seedUser.email }).lean();
+      if (existing) continue;
+      const hashedPassword = await bcrypt.hash(seedPassword, 10);
+      const created = await User.create({
+        name: seedUser.name,
+        email: seedUser.email,
+        password: hashedPassword,
+        role: seedUser.role,
+        phone: '',
+        created_at: new Date(),
+        updated_at: new Date(),
+      });
+      await Wallet.create({ user_id: created._id, balance: 0, created_at: new Date(), updated_at: new Date() });
+      await Reward.create({ user_id: created._id, points: 0, created_at: new Date(), updated_at: new Date() });
+      await NotificationPreference.create({ user_id: created._id, inapp: true, sms: true, email: true });
+      if (seedUser.role === 'driver') {
+        await Driver.create({ user_id: created._id, phone: '', vehicle_type: 'motorcycle', created_at: new Date(), updated_at: new Date() });
+      }
+    }
   };
 
   await ensureDefaults();
@@ -345,9 +412,10 @@ async function startServer() {
   // Auth Routes
   app.post('/api/auth/register', async (req, res) => {
     try {
-      const { name, email, password, role, phone, vehicleType } = req.body;
-      
-      if (!name || !email || !password || !role) {
+      const { name, email, password, phone } = req.body;
+      const role = 'customer';
+
+      if (!name || !email || !password) {
         return res.status(400).json({ error: 'Missing required fields' });
       }
       if (!validateEmail(email)) {
@@ -355,9 +423,6 @@ async function startServer() {
       }
       if (phone && !validatePhone(phone)) {
         return res.status(400).json({ error: 'Invalid phone number' });
-      }
-      if (role === 'driver' && (!phone || !vehicleType)) {
-        return res.status(400).json({ error: 'Driver phone and vehicle type are required' });
       }
 
       const existingUser = await User.findOne({ email }).lean();
@@ -368,9 +433,6 @@ async function startServer() {
       const hashedPassword = await bcrypt.hash(password, 10);
       const user = await User.create({ name, email, password: hashedPassword, role, phone: phone || '', created_at: new Date(), updated_at: new Date() });
 
-      if (role === 'driver') {
-        await Driver.create({ user_id: user._id, phone: phone || '', vehicle_type: vehicleType || '', created_at: new Date(), updated_at: new Date() });
-      }
       await Wallet.create({ user_id: user._id, balance: 0, created_at: new Date(), updated_at: new Date() });
       await Reward.create({ user_id: user._id, points: 0, created_at: new Date(), updated_at: new Date() });
       await NotificationPreference.create({ user_id: user._id, inapp: true, sms: true, email: true });
@@ -393,6 +455,9 @@ async function startServer() {
       const user = await User.findOne({ email }).lean();
       if (!user) {
         return res.status(401).json({ error: 'Invalid email or password' });
+      }
+      if (user.is_active === false) {
+        return res.status(403).json({ error: 'Account is inactive. Contact your administrator.' });
       }
 
       const validPassword = await bcrypt.compare(password, user.password);
@@ -419,21 +484,44 @@ async function startServer() {
   });
 
   // Middleware to verify JWT
-  const authenticateToken = (req: any, res: any, next: any) => {
+  async function authenticateToken(req: any, res: any, next: any) {
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.split(' ')[1];
 
     if (!token) return res.status(401).json({ error: 'Unauthorized' });
 
-    jwt.verify(token, JWT_SECRET, (err: any, user: any) => {
-      if (err) return res.status(403).json({ error: 'Forbidden' });
-      req.user = user;
+    try {
+      const payload = jwt.verify(token, JWT_SECRET) as any;
+      const activeUser = await User.findById(payload.id).select('role is_active').lean();
+      if (!activeUser) return res.status(401).json({ error: 'Unauthorized' });
+      if (activeUser.is_active === false) {
+        return res.status(403).json({ error: 'Account is inactive. Contact your administrator.' });
+      }
+      req.user = { ...payload, role: activeUser.role };
       next();
-    });
+    } catch {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+  }
+
+  const expandRoles = (roles: string[]) => {
+    const expanded = new Set<string>();
+    for (const role of roles) {
+      if (role === 'admin') {
+        ADMIN_ROLES.forEach((adminRole) => expanded.add(adminRole));
+        SUPER_ADMIN_ROLES.forEach((adminRole) => expanded.add(adminRole));
+      } else if (role === 'super_admin') {
+        SUPER_ADMIN_ROLES.forEach((adminRole) => expanded.add(adminRole));
+      } else {
+        expanded.add(role);
+      }
+    }
+    return Array.from(expanded);
   };
 
   const requireRole = (roles: string[]) => (req: any, res: any, next: any) => {
-    if (!roles.includes(req.user.role)) {
+    const allowedRoles = expandRoles(roles);
+    if (!allowedRoles.includes(req.user.role)) {
       return res.status(403).json({ error: 'Forbidden' });
     }
     next();
@@ -493,6 +581,16 @@ async function startServer() {
   const updateOrderStatus = async (orderId: string, nextStatus: string, actorRole: string, actorId: string | null, note?: string) => {
     const order = await Order.findById(orderId).lean();
     if (!order) throw new Error('Order not found');
+    if (order.status === nextStatus) {
+      const normalized = normalizeDoc(order);
+      emitOrderUpdate(normalized);
+      return normalized;
+    }
+    if (order.status === 'completed' && nextStatus === 'delivered') {
+      const normalized = normalizeDoc(order);
+      emitOrderUpdate(normalized);
+      return normalized;
+    }
     if (!STATUS_TRANSITIONS[order.status]?.includes(nextStatus)) {
       throw new Error(`Invalid transition from ${order.status} to ${nextStatus}`);
     }
@@ -582,11 +680,59 @@ async function startServer() {
   }, 15000);
 
   // Orders Routes
+  app.get('/api/track/:code', async (req: any, res: any) => {
+    try {
+      const rawCode = String(req.params.code || '').trim();
+      const normalizedCode = rawCode.toUpperCase();
+      const digitsOnly = normalizedCode.replace(/[^0-9]/g, '');
+      if (!normalizedCode) return res.status(400).json({ error: 'Tracking code required' });
+      let order = null;
+      if (mongoose.Types.ObjectId.isValid(normalizedCode)) {
+        order = await Order.findById(normalizedCode).lean();
+      }
+      if (!order) {
+        order = await Order.findOne({ tracking_code: normalizedCode }).lean();
+      }
+      if (!order && digitsOnly) {
+        order = await Order.findOne({ tracking_code: { $regex: digitsOnly, $options: 'i' } })
+          .sort({ created_at: -1 })
+          .lean();
+      }
+      if (!order) return res.status(404).json({ error: 'Order not found' });
+      const events = await OrderEvent.find({ order_id: toObjectId(String(order._id)) }).sort({ created_at: 1 }).lean();
+
+      let driverLocation = null as null | { lat: number; lng: number; updated_at?: Date | null };
+      if (order?.driver_id) {
+        const driverIdRaw = String(order.driver_id);
+        if (mongoose.Types.ObjectId.isValid(driverIdRaw)) {
+          const driverId = toObjectId(driverIdRaw);
+          const latestLocation = await DriverLocation.findOne({ driver_id: driverId }).sort({ updated_at: -1 }).lean();
+          if (latestLocation && typeof latestLocation.lat === 'number' && typeof latestLocation.lng === 'number') {
+            driverLocation = { lat: latestLocation.lat, lng: latestLocation.lng, updated_at: latestLocation.updated_at || null };
+          } else {
+            const driver = await Driver.findOne({ user_id: driverId }).lean();
+            if (driver && typeof driver.last_lat === 'number' && typeof driver.last_lng === 'number') {
+              driverLocation = { lat: driver.last_lat, lng: driver.last_lng, updated_at: driver.last_seen || driver.updated_at || null };
+            }
+          }
+        }
+      }
+
+      res.json({ order: normalizeDoc(order), events: normalizeMany(events), driverLocation });
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
   app.post('/api/orders/quote', authenticateToken, requireRole(['customer']), async (req: any, res: any) => {
     try {
       const { pickup, dropoff, packageSize, packageWeight, serviceType, insurance, promoCode, pickupLat, pickupLng, dropoffLat, dropoffLng } = req.body;
       if (!pickup || !dropoff) return res.status(400).json({ error: 'Pickup and drop-off required.' });
-      const zone = (await getZoneForCoords(pickupLat, pickupLng)) || (await getZoneForCoords(dropoffLat, dropoffLng)) || (await inferZoneFromAddress(pickup, dropoff));
+      const zone =
+        (await getZoneForCoords(pickupLat, pickupLng)) ||
+        (await getZoneForCoords(dropoffLat, dropoffLng)) ||
+        (await inferZoneFromAddress(pickup, dropoff)) ||
+        (ALLOW_OUT_OF_ZONE ? await Zone.findOne({ status: 'active' }).sort({ name: 1 }).lean() : null);
       if (!zone || zone.status !== 'active') {
         return res.status(400).json({ error: zone?.message || 'Service is only available in Addis Ababa zones for now.' });
       }
@@ -722,7 +868,7 @@ async function startServer() {
     }
   });
 
-  app.get('/api/orders', authenticateToken, async (req: any, res: any) => {
+  app.get('/api/orders', authenticateToken, requireRole(['customer', 'driver', 'dispatcher', 'admin']), async (req: any, res: any) => {
     try {
       let orders;
       if (req.user.role === 'customer') {
@@ -746,8 +892,14 @@ async function startServer() {
       if (req.user.role === 'customer' && String(order.customer_id) !== req.user.id) {
         return res.status(403).json({ error: 'Forbidden' });
       }
-      if (req.user.role === 'driver' && String(order.driver_id) !== req.user.id) {
-        return res.status(403).json({ error: 'Forbidden' });
+      if (req.user.role === 'driver') {
+        const driverDoc = await Driver.findOne({ user_id: toObjectId(req.user.id) }).select('_id user_id').lean();
+        const allowedIds = new Set<string>([String(req.user.id)]);
+        if (driverDoc?._id) allowedIds.add(String(driverDoc._id));
+        if (driverDoc?.user_id) allowedIds.add(String(driverDoc.user_id));
+        if (!allowedIds.has(String(order.driver_id))) {
+          return res.status(403).json({ error: 'Forbidden' });
+        }
       }
       const events = await OrderEvent.find({ order_id: toObjectId(id) }).sort({ created_at: 1 }).lean();
       res.json({ order: normalizeDoc(order), events: normalizeMany(events) });
@@ -944,7 +1096,7 @@ async function startServer() {
         }
       }
 
-      if (req.user.role === 'driver') {
+      if (req.user.role === 'driver' && ENFORCE_DRIVER_PROXIMITY) {
         const driver = await Driver.findOne({ user_id: toObjectId(req.user.id) }).select('last_lat last_lng').lean();
         const driverLat = driver?.last_lat;
         const driverLng = driver?.last_lng;
@@ -988,7 +1140,7 @@ async function startServer() {
     }
   });
 
-  app.post('/api/orders/:id/assign', authenticateToken, requireRole(['admin']), async (req: any, res: any) => {
+  app.post('/api/orders/:id/assign', authenticateToken, requireRole(['admin', 'dispatcher']), async (req: any, res: any) => {
     try {
       const { driverId } = req.body;
       const order = await Order.findById(req.params.id).lean();
@@ -996,11 +1148,23 @@ async function startServer() {
       if (!['confirmed', 'driver_assigned'].includes(order.status)) {
         return res.status(400).json({ error: 'Cannot assign at this stage' });
       }
-      await Order.findByIdAndUpdate(order._id, { driver_id: toObjectId(driverId), status: 'driver_assigned', updated_at: new Date() });
+      const driverIdRaw = String(driverId || '').trim();
+      if (!driverIdRaw) return res.status(400).json({ error: 'Driver required' });
+      let resolvedDriverId = driverIdRaw;
+      const driverById = await Driver.findById(driverIdRaw).select('user_id').lean();
+      if (driverById?.user_id) {
+        resolvedDriverId = String(driverById.user_id);
+      } else if (mongoose.Types.ObjectId.isValid(driverIdRaw)) {
+        const driverByUser = await Driver.findOne({ user_id: toObjectId(driverIdRaw) }).select('user_id').lean();
+        if (driverByUser?.user_id) {
+          resolvedDriverId = String(driverByUser.user_id);
+        }
+      }
+      await Order.findByIdAndUpdate(order._id, { driver_id: toObjectId(resolvedDriverId), status: 'driver_assigned', updated_at: new Date() });
       const distanceKm = order.pickup_lat && order.dropoff_lat ? await getRouteDistanceKm(order.pickup_lat, order.pickup_lng, order.dropoff_lat, order.dropoff_lng) : 6;
       const eta = computeETA(distanceKm, order.service_type, 1);
       await Order.findByIdAndUpdate(order._id, { eta_minutes: eta.etaMinutes, eta_text: eta.etaText });
-      await recordOrderEvent(String(order._id), 'admin', req.user.id, 'driver_assigned', order.status, 'driver_assigned', `Assigned to driver ${driverId}`);
+      await recordOrderEvent(String(order._id), req.user.role, req.user.id, 'driver_assigned', order.status, 'driver_assigned', `Assigned to driver ${driverId}`);
       logAudit(req.user.id, req.user.role, 'driver_assigned', 'order', Number(order._id), `driver ${driverId}`);
       await createNotification(String(order.customer_id), 'driver_assigned', 'Driver assigned', `Driver assigned to order ${order.tracking_code || order.id}.`);
       await createNotification(driverId, 'order_assigned', 'New delivery assigned', `Order ${order.tracking_code || order.id} assigned to you.`);
@@ -1080,7 +1244,7 @@ async function startServer() {
       await DriverLocation.findOneAndUpdate(
         { driver_id: toObjectId(req.user.id) },
         { driver_id: toObjectId(req.user.id), lat, lng, updated_at: new Date() },
-        { upsert: true, new: true }
+        { upsert: true, returnDocument: 'after' }
       );
       io.to('role_admin').emit('driver_location', { driverId: req.user.id, lat, lng });
 
@@ -1154,7 +1318,7 @@ async function startServer() {
       const updated = await Address.findOneAndUpdate(
         { _id: req.params.id, user_id: toObjectId(req.user.id) },
         { label, address, updated_at: new Date() },
-        { new: true }
+        { returnDocument: 'after' }
       );
       res.json(normalizeDoc(updated));
     } catch (error) {
@@ -1253,7 +1417,7 @@ async function startServer() {
       await NotificationPreference.findOneAndUpdate(
         { user_id: toObjectId(req.user.id) },
         { inapp: !!inapp, sms: !!sms, email: !!email },
-        { upsert: true, new: true }
+        { upsert: true, returnDocument: 'after' }
       );
       res.json({ success: true });
     } catch (error) {
@@ -1374,31 +1538,107 @@ async function startServer() {
   });
 
   // Admin Routes
-  app.get('/api/users', authenticateToken, async (req: any, res: any) => {
+  app.get('/api/users', authenticateToken, requireRole(['admin']), async (req: any, res: any) => {
     try {
-      if (req.user.role !== 'admin') return res.status(403).json({ error: 'Unauthorized' });
-      const users = await User.find().select('name email role phone').lean();
+      const users = await User.find().select('name email role phone is_active').lean();
       res.json(normalizeMany(users));
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
     }
   });
 
-  app.get('/api/drivers', authenticateToken, async (req: any, res: any) => {
+  app.post('/api/admin/users', authenticateToken, requireRole(['admin']), async (req: any, res: any) => {
     try {
-      if (req.user.role !== 'admin') return res.status(403).json({ error: 'Unauthorized' });
-      const drivers = await Driver.find().lean();
-      const users = await User.find({ _id: { $in: drivers.map((d) => d.user_id) } }).select('name email').lean();
-      const userMap = new Map(users.map((u) => [String(u._id), u]));
-      res.json(drivers.map((driver) => ({ ...driver, id: String(driver._id), name: userMap.get(String(driver.user_id))?.name, email: userMap.get(String(driver.user_id))?.email })));
+      const { name, email, password, role, phone, vehicleType } = req.body;
+      if (!name || !email || !password || !role) {
+        return res.status(400).json({ error: 'Missing required fields' });
+      }
+      if (!validateEmail(email)) {
+        return res.status(400).json({ error: 'Invalid email' });
+      }
+      if (phone && !validatePhone(phone)) {
+        return res.status(400).json({ error: 'Invalid phone number' });
+      }
+
+      const roleMatrix: Record<string, string[]> = {
+        super_admin: ['admin', 'manager', 'dispatcher', 'driver', 'customer'],
+        admin: ['dispatcher', 'driver'],
+        manager: ['dispatcher', 'driver'],
+      };
+      const allowedRoles = roleMatrix[req.user.role] || [];
+      if (!allowedRoles.includes(role)) {
+        return res.status(403).json({ error: 'Unauthorized to create this role' });
+      }
+
+      const existing = await User.findOne({ email }).lean();
+      if (existing) return res.status(400).json({ error: 'Email already registered' });
+
+      const hashedPassword = await bcrypt.hash(password, 10);
+      const user = await User.create({
+        name,
+        email,
+        password: hashedPassword,
+        role,
+        phone: phone || '',
+        is_active: true,
+        created_at: new Date(),
+        updated_at: new Date(),
+      });
+
+      if (role === 'driver') {
+        await Driver.create({
+          user_id: user._id,
+          phone: phone || '',
+          vehicle_type: vehicleType || 'motorcycle',
+          created_at: new Date(),
+          updated_at: new Date(),
+        });
+      }
+
+      if (role === 'customer') {
+        await Wallet.create({ user_id: user._id, balance: 0, created_at: new Date(), updated_at: new Date() });
+        await Reward.create({ user_id: user._id, points: 0, created_at: new Date(), updated_at: new Date() });
+        await NotificationPreference.create({ user_id: user._id, inapp: true, sms: true, email: true });
+      }
+
+      logAudit(req.user.id, req.user.role, 'user_created', 'user', Number(user._id), role);
+      res.json({ user: { id: String(user._id), name: user.name, email: user.email, role: user.role } });
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
     }
   });
 
-  app.put('/api/drivers/:id/status', authenticateToken, async (req: any, res: any) => {
+  app.put('/api/admin/users/:id/active', authenticateToken, requireRole(['super_admin']), async (req: any, res: any) => {
     try {
-      if (req.user.role !== 'admin') return res.status(403).json({ error: 'Unauthorized' });
+      const { active } = req.body;
+      const { id } = req.params;
+      await User.findByIdAndUpdate(id, { is_active: !!active, updated_at: new Date() });
+      logAudit(req.user.id, req.user.role, 'user_status_update', 'user', Number(id), !!active ? 'active' : 'inactive');
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.get('/api/drivers', authenticateToken, requireRole(['admin', 'dispatcher']), async (req: any, res: any) => {
+    try {
+      const drivers = await Driver.find().lean();
+      const users = await User.find({ _id: { $in: drivers.map((d) => d.user_id) } }).select('name email phone').lean();
+      const userMap = new Map(users.map((u) => [String(u._id), u]));
+      res.json(drivers.map((driver) => ({
+        ...driver,
+        id: String(driver._id),
+        name: userMap.get(String(driver.user_id))?.name,
+        email: userMap.get(String(driver.user_id))?.email,
+        phone: userMap.get(String(driver.user_id))?.phone,
+      })));
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.put('/api/drivers/:id/status', authenticateToken, requireRole(['admin']), async (req: any, res: any) => {
+    try {
       const { id } = req.params;
       const { status } = req.body;
       await Driver.findByIdAndUpdate(id, { status, updated_at: new Date() });

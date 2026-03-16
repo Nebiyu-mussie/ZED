@@ -8,7 +8,7 @@ const CONTACT = {
   address: 'Bole Road, Addis Ababa, Ethiopia',
 };
 
-const SECTION_IDS = ['home', 'services', 'store', 'track', 'pricing', 'contact'];
+const SECTION_IDS = ['home', 'services', 'track', 'pricing', 'contact'];
 
 export default function Layout() {
   const navigate = useNavigate();
@@ -22,6 +22,15 @@ export default function Layout() {
     localStorage.removeItem('token');
     localStorage.removeItem('user');
     navigate('/login');
+  };
+
+  const dashboardPath = (role?: string) => {
+    if (!role) return '/login';
+    if (role === 'super_admin') return '/super-admin-dashboard';
+    if (role === 'admin' || role === 'manager') return '/admin-dashboard';
+    if (role === 'dispatcher') return '/dispatcher-dashboard';
+    if (role === 'driver') return '/driver-dashboard';
+    return '/customer-dashboard';
   };
 
   const handleSectionNav = (sectionId: string) => {
@@ -100,14 +109,6 @@ export default function Layout() {
             </button>
             <button
               type="button"
-              onClick={() => handleSectionNav('store')}
-              className={navItemClass('store')}
-              aria-current={activeSection === 'store' ? 'page' : undefined}
-            >
-              Store
-            </button>
-            <button
-              type="button"
               onClick={() => handleSectionNav('track')}
               className={navItemClass('track')}
               aria-current={activeSection === 'track' ? 'page' : undefined}
@@ -132,7 +133,7 @@ export default function Layout() {
             </button>
             {user ? (
               <>
-                <Link to={`/${user.role}-dashboard`} className="text-sm font-semibold text-slate-600 hover:text-[#F28C3A] transition-colors">
+                <Link to={dashboardPath(user.role)} className="text-sm font-semibold text-slate-600 hover:text-[#F28C3A] transition-colors">
                   Dashboard
                 </Link>
                 <div className="flex items-center gap-2 text-xs text-slate-500 bg-slate-100 px-3 py-1.5 rounded-full">
@@ -180,13 +181,6 @@ export default function Layout() {
             </button>
             <button
               type="button"
-              className={`block text-left font-semibold w-full ${activeSection === 'store' ? 'text-[#F28C3A]' : 'text-slate-600'}`}
-              onClick={() => handleSectionNav('store')}
-            >
-              Store
-            </button>
-            <button
-              type="button"
               className={`block text-left font-semibold w-full ${activeSection === 'track' ? 'text-[#F28C3A]' : 'text-slate-600'}`}
               onClick={() => handleSectionNav('track')}
             >
@@ -212,7 +206,7 @@ export default function Layout() {
                   <User className="h-4 w-4" />
                   <span>{user.name} ({user.role})</span>
                 </div>
-                <Link to={`/${user.role}-dashboard`} className="block text-slate-600 font-semibold" onClick={() => setIsMenuOpen(false)}>
+                <Link to={dashboardPath(user.role)} className="block text-slate-600 font-semibold" onClick={() => setIsMenuOpen(false)}>
                   Dashboard
                 </Link>
                 <button onClick={() => { handleLogout(); setIsMenuOpen(false); }} className="flex items-center gap-2 text-red-600 font-medium w-full text-left">
@@ -258,7 +252,6 @@ export default function Layout() {
               <li><Link to="/" className="hover:text-[#F28C3A] transition-colors">Home</Link></li>
               <li><button type="button" onClick={() => handleSectionNav('services')} className="hover:text-[#F28C3A] transition-colors">Services</button></li>
               <li><button type="button" onClick={() => handleSectionNav('pricing')} className="hover:text-[#F28C3A] transition-colors">Pricing</button></li>
-              <li><Link to="/store" className="hover:text-[#F28C3A] transition-colors">ZED Store</Link></li>
             </ul>
           </div>
           <div>

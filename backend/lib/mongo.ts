@@ -8,6 +8,9 @@ export const connectMongo = async () => {
   if (connected) return;
   mongoose.set('strictQuery', false);
   await mongoose.connect(MONGODB_URI);
+  const host = mongoose.connection.host || 'unknown-host';
+  const dbName = mongoose.connection.name || 'unknown-db';
+  console.log(`MongoDB connected: ${host}/${dbName}`);
   connected = true;
 };
 

@@ -7,6 +7,8 @@ import { useToast } from '../components/ui/Toast';
 import { getSocket } from '../lib/socket';
 
 export default function DriverDashboard() {
+  const storedUser = JSON.parse(localStorage.getItem('user') || '{}');
+  const isDriverUser = storedUser?.role === 'driver';
   const [orders, setOrders] = useState<any[]>([]);
   const [offers, setOffers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -56,6 +58,10 @@ export default function DriverDashboard() {
   };
 
   useEffect(() => {
+    if (!isDriverUser) {
+      setLoading(false);
+      return;
+    }
     fetchAll();
     const socket = getSocket();
     socket.on('order_updated', (order: any) => {
@@ -66,16 +72,16 @@ export default function DriverDashboard() {
       });
     });
     socket.on('dispatch_offer', () => {
-      apiFetch('/api/dispatch/offers').then(setOffers);
+      apiFetch('/api/dispatch/offers').then(setOffers).catch(() => undefined);
     });
     return () => {
       socket.off('order_updated');
       socket.off('dispatch_offer');
     };
-  }, []);
+  }, [isDriverUser]);
 
   useEffect(() => {
-    if (!isAvailable) return;
+    if (!isAvailable || !isDriverUser) return;
     let interval: number | undefined;
     const updateLocation = () => {
       if (navigator.geolocation) {
@@ -83,13 +89,13 @@ export default function DriverDashboard() {
           apiFetch('/api/drivers/me/location', {
             method: 'POST',
             body: JSON.stringify({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
-          });
+          }).catch(() => undefined);
         });
       } else {
         apiFetch('/api/drivers/me/location', {
           method: 'POST',
           body: JSON.stringify({ lat: 8.98 + Math.random() * 0.02, lng: 38.75 + Math.random() * 0.02 }),
-        });
+        }).catch(() => undefined);
       }
     };
     updateLocation();
@@ -97,13 +103,17 @@ export default function DriverDashboard() {
     return () => {
       if (interval) window.clearInterval(interval);
     };
-  }, [isAvailable]);
+  }, [isAvailable, isDriverUser]);
 
   const toggleAvailability = async () => {
     const next = !isAvailable;
     setIsAvailable(next);
-    await apiFetch('/api/drivers/me/availability', { method: 'PUT', body: JSON.stringify({ isOnline: next }) });
-    toast.push({ title: next ? 'You are online' : 'You are offline', variant: 'info' });
+    try {
+      await apiFetch('/api/drivers/me/availability', { method: 'PUT', body: JSON.stringify({ isOnline: next }) });
+      toast.push({ title: next ? 'You are online' : 'You are offline', variant: 'info' });
+    } catch {
+      toast.push({ title: 'Unable to update availability', variant: 'error' });
+    }
   };
 
   const activeOrder = orders.find((order) => order.driver_id === driverProfile?.user_id && ['driver_assigned', 'picked_up', 'in_transit'].includes(order.status));
@@ -189,6 +199,10 @@ export default function DriverDashboard() {
 
   if (loading) {
     return <div className="text-center py-12 text-gray-500">Loading driver dashboard...</div>;
+  }
+
+  if (!isDriverUser) {
+    return <div className="text-center py-12 text-gray-500">Please sign in with a driver account to access this dashboard.</div>;
   }
 
   if (!driverProfile) {

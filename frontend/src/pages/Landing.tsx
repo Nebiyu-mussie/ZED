@@ -10,7 +10,6 @@ import {
   ArrowRight,
   Check,
   Star,
-  Store,
   BadgeCheck,
   Sparkles,
   Phone,
@@ -544,67 +543,6 @@ export default function Landing() {
                 <div className="text-xs text-slate-400">{review.role}</div>
               </div>
             ))}
-          </div>
-        </div>
-      </section>
-
-      {/* Store Promo */}
-      <section id="store" className="scroll-mt-24 py-16 bg-white">
-        <div className="max-w-[1200px] mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="rounded-[32px] border border-slate-100 bg-gradient-to-r from-white via-[#F7F7FB] to-white p-8 md:p-10 shadow-sm reveal" data-reveal>
-            <div className="grid grid-cols-1 lg:grid-cols-[1fr_0.9fr] gap-8 items-center">
-              <div>
-                <p className="section-label">ZED Store</p>
-                <h2 className="section-title">Premium tech delivered same-day</h2>
-                <p className="section-sub">
-                  Shop devices and accessories with fast delivery and professional handling from our curated ZED Store.
-                </p>
-                <div className="mt-6 flex flex-wrap gap-3 text-sm text-slate-600">
-                  {['Phones', 'Laptops', 'Accessories', 'Smart Home'].map((item) => (
-                    <span key={item} className="rounded-full border border-slate-200 px-4 py-2">
-                      {item}
-                    </span>
-                  ))}
-                </div>
-                <div className="mt-6 flex flex-col sm:flex-row gap-4">
-                  <Link
-                    to="/store"
-                    className="btn-primary px-6"
-                  >
-                    Visit ZED Store
-                    <Store className="h-4 w-4" />
-                  </Link>
-                  <button
-                    type="button"
-                    className="btn-secondary px-6"
-                  >
-                    See featured items
-                  </button>
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                {[
-                  { icon: <Package className="h-5 w-5" />, title: 'Secure packaging', text: 'Handled with care' },
-                  { icon: <Truck className="h-5 w-5" />, title: 'Same-day option', text: 'Available city-wide' },
-                  { icon: <ShieldCheck className="h-5 w-5" />, title: 'Insured items', text: 'Protection included' },
-                  { icon: <Clock className="h-5 w-5" />, title: 'Fast pickup', text: 'Within 30 minutes' },
-                ].map((item, index) => (
-                  <div
-                    key={item.title}
-                    className="rounded-2xl border border-slate-100 bg-white p-4 shadow-sm reveal"
-                    data-reveal
-                    data-stagger
-                    style={{ '--stagger-delay': `${index * 70}ms` } as CSSProperties}
-                  >
-                    <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[#F28C3A]/15 text-[#F28C3A]">
-                      {item.icon}
-                    </div>
-                    <h4 className="mt-3 text-sm font-semibold text-[#2A1B7A]">{item.title}</h4>
-                    <p className="mt-1 text-xs text-slate-500">{item.text}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
           </div>
         </div>
       </section>
