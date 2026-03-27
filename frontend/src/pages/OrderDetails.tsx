@@ -21,6 +21,12 @@ const STATUS_COLORS: Record<string, string> = {
   failed: 'bg-red-100 text-red-800 border-red-200',
 };
 
+const PAYMENT_STATUS_COLORS: Record<string, string> = {
+  pending: 'bg-yellow-100 text-yellow-800 border-yellow-200',
+  paid: 'bg-green-100 text-green-800 border-green-200',
+  failed: 'bg-red-100 text-red-800 border-red-200',
+};
+
 export default function OrderDetails() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -190,6 +196,11 @@ export default function OrderDetails() {
             <span className={`px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider border ${STATUS_COLORS[order.status] || STATUS_COLORS.draft}`}>
               {order.status.replace('_', ' ')}
             </span>
+            {order.payment_method === 'chapa' && (
+              <span className={`px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider border ${PAYMENT_STATUS_COLORS[order.payment_status] || PAYMENT_STATUS_COLORS.pending}`}>
+                Payment {String(order.payment_status || 'pending').replace('_', ' ')}
+              </span>
+            )}
             {order.eta_text && <span className="text-xs text-gray-500">ETA: {order.eta_text}</span>}
             {order.sla_status && (
               <span className={`text-xs font-semibold ${order.sla_status === 'late' ? 'text-red-600' : order.sla_status === 'at_risk' ? 'text-orange-500' : 'text-green-600'}`}>

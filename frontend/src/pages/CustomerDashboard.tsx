@@ -100,6 +100,10 @@ export default function CustomerDashboard() {
           paymentMethod: data.paymentMethod || 'cash',
         }),
       });
+      if (data.paymentMethod === 'chapa') {
+        submitChapaHostedCheckout(order, data);
+        return;
+      }
       setIsCreating(false);
       setOrders((prev) => [order, ...prev]);
       toast.push({ title: 'Order confirmed', description: 'We are finding a driver for you.', variant: 'success' });
@@ -146,6 +150,56 @@ export default function CustomerDashboard() {
     } catch (error: any) {
       toast.push({ title: 'Unable to save preferences', description: error.error || '', variant: 'error' });
     }
+  };
+
+  const submitChapaHostedCheckout = (order: any, data: any) => {
+    const chapaPublicKey = (import.meta as any).env?.VITE_CHAPA_PUBLIC_KEY || 'CHAPUBK_TEST-N9ASXvlHv61Nh4ZuLTi5UtcQY7KwZmQk';
+    const user = JSON.parse(localStorage.getItem('user') || '{}');
+    const email = String(user.email || '').trim();
+    if (!email) {
+      throw new Error('Missing customer email for Chapa checkout.');
+    }
+
+    const displayName = String(user.name || 'ZED Customer').trim();
+    const nameParts = displayName.split(/\s+/);
+    const firstName = nameParts.shift() || 'ZED';
+    const lastName = nameParts.length > 0 ? nameParts.join(' ') : 'Customer';
+    const txRef = String(order.payment_reference || order.tracking_code || `zed-${order.id}`);
+    const checkoutUrl = 'https://api.chapa.co/v1/hosted/pay';
+    const callbackUrl = `${window.location.origin}/api/payments/chapa/callback`;
+    const returnUrl = `${window.location.origin}/orders/${order.id}?payment=success&tx_ref=${encodeURIComponent(txRef)}`;
+
+    const fields: Record<string, string> = {
+      public_key: chapaPublicKey,
+      tx_ref: txRef,
+      amount: Number(order.total || data.pricing?.total || 0).toFixed(2),
+      currency: 'ETB',
+      email,
+      first_name: firstName,
+      last_name: lastName,
+      title: `Delivery payment for ${order.tracking_code || order.id}`,
+      description: `${data.pickup} → ${data.dropoff}`,
+      callback_url: callbackUrl,
+      return_url: returnUrl,
+      'meta[order_id]': String(order.id),
+      'meta[tracking_code]': String(order.tracking_code || order.id),
+    };
+
+    const form = document.createElement('form');
+    form.method = 'POST';
+    form.action = checkoutUrl;
+    form.style.display = 'none';
+
+    Object.entries(fields).forEach(([name, value]) => {
+      const input = document.createElement('input');
+      input.type = 'hidden';
+      input.name = name;
+      input.value = value;
+      form.appendChild(input);
+    });
+
+    document.body.appendChild(form);
+    form.submit();
   };
 
   return (

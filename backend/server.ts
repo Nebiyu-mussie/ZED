@@ -1,4 +1,4 @@
-import 'dotenv/config';
+import './lib/loadEnv.js';
 import express from 'express';
 import { createServer as createViteServer } from 'vite';
 import bcrypt from 'bcryptjs';
@@ -75,7 +75,10 @@ const VALID_SERVICE_TYPES = ['express', 'same_day', 'next_day', 'scheduled'];
 const VALID_ORDER_PAYMENT_METHODS = ['cash', 'chapa'] as const;
 const PASSWORD_RESET_OTP_TTL_MINUTES = Number(process.env.PASSWORD_RESET_OTP_TTL_MINUTES || 10);
 const PASSWORD_RESET_EMAIL_FROM = process.env.PASSWORD_RESET_EMAIL_FROM || process.env.SMTP_USER || 'no-reply@zemen.local';
-const PASSWORD_RESET_APP_URL = process.env.APP_URL || 'http://localhost:3000';
+const APP_BASE_URL = process.env.APP_URL || 'http://localhost:3000';
+const PASSWORD_RESET_APP_URL = APP_BASE_URL;
+const CHAPA_SECRET_KEY = process.env.CHAPA_SECRET_KEY || '';
+const CHAPA_API_BASE_URL = 'https://api.chapa.co/v1';
 
 const validateEmail = (email: string) => /\S+@\S+\.\S+/.test(email);
 const validatePhone = (phone: string) => /^\+?\d[\d\s-]{7,}$/.test(phone);
@@ -289,6 +292,35 @@ const getPromo = async (code: string, userId: string) => {
   return promo;
 };
 
+const verifyChapaTransaction = async (txRef: string) => {
+  if (!txRef) {
+    throw new Error('Missing Chapa transaction reference.');
+  }
+  if (!CHAPA_SECRET_KEY) {
+    return null;
+  }
+
+  const response = await fetch(`${CHAPA_API_BASE_URL}/transaction/verify/${encodeURIComponent(txRef)}`, {
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${CHAPA_SECRET_KEY}`,
+      'Content-Type': 'application/json',
+    },
+  });
+  const payload = await response.json().catch(() => null);
+  if (!response.ok) {
+    throw new Error(payload?.message || payload?.error || 'Unable to verify Chapa transaction.');
+  }
+  return payload;
+};
+
+const getChapaPaymentStatus = (verification: any, fallbackStatus?: string) => {
+  const rawStatus = String(verification?.status || verification?.data?.status || fallbackStatus || '').toLowerCase();
+  if (rawStatus === 'success' || rawStatus === 'paid' || rawStatus === 'completed') return 'paid';
+  if (rawStatus === 'failed' || rawStatus === 'cancelled' || rawStatus === 'canceled') return 'failed';
+  return 'pending';
+};
+
   const logAudit = (
     actorId: number | string | null,
     actorRole: string | null,
@@ -465,6 +497,7 @@ async function startServer() {
   });
 
   app.use(express.json());
+  app.use(express.urlencoded({ extended: true }));
   app.use((req, res, next) => {
     const started = Date.now();
     res.on('finish', () => {
@@ -1083,6 +1116,9 @@ async function startServer() {
         proof_otp: otp,
         tracking_code: trackingCode,
         payment_method: normalizedPaymentMethod,
+        payment_status: 'pending',
+        payment_reference: trackingCode,
+        payment_checkout_url: null,
         cod_amount: codAmount || 0,
         eta_minutes: eta.etaMinutes,
         eta_text: eta.etaText,
@@ -1095,7 +1131,9 @@ async function startServer() {
       await createRoleNotifications(['dispatcher'], 'order_confirmed', 'New order awaiting dispatch', `Tracking ${order.tracking_code} is ready for assignment.`);
       const normalized = normalizeDoc(order);
       emitOrderUpdate(normalized);
-      await autoDispatch(String(order._id));
+      if (normalizedPaymentMethod !== 'chapa') {
+        await autoDispatch(String(order._id));
+      }
       res.json(normalized);
     } catch (error) {
       console.error('Create order error:', error);
@@ -2192,17 +2230,64 @@ async function startServer() {
     }
   });
 
-  // Mock Chapa Payment Route
-  app.post('/api/payments/chapa', authenticateToken, (req: any, res: any) => {
+  app.all('/api/payments/chapa/callback', async (req: any, res: any) => {
     try {
-      const { amount, email, name } = req.body;
-      // In a real app, this would call Chapa's API to initialize payment
-      // For this prototype, we simulate a successful payment delay
-      setTimeout(() => {
-        res.json({ success: true, message: 'Payment processed successfully via Chapa', transactionId: 'CHAPA-' + Math.random().toString(36).substring(7).toUpperCase() });
-      }, 1500);
+      const txRef = String(req.body?.tx_ref || req.body?.trx_ref || req.query?.tx_ref || req.query?.trx_ref || '').trim();
+      const callbackStatus = String(req.body?.status || req.query?.status || '').toLowerCase();
+      if (!txRef) {
+        return res.status(400).json({ error: 'Missing Chapa transaction reference.' });
+      }
+
+      const order = await Order.findOne({ payment_reference: txRef }).lean();
+      if (!order) {
+        return res.status(404).json({ error: 'Order not found for this payment reference.' });
+      }
+
+      let verification: any = null;
+      if (CHAPA_SECRET_KEY) {
+        verification = await verifyChapaTransaction(txRef);
+      }
+
+      const paymentStatus = getChapaPaymentStatus(verification, callbackStatus);
+      const paymentAlreadySettled = String(order.payment_status || '').toLowerCase() === 'paid';
+
+      if (!paymentAlreadySettled) {
+        await Order.findByIdAndUpdate(order._id, {
+          payment_status: paymentStatus,
+          payment_verified_at: paymentStatus === 'paid' ? new Date() : null,
+          payment_checkout_url: verification?.data?.checkout_url || order.payment_checkout_url || null,
+          updated_at: new Date(),
+        });
+      }
+
+      const refreshed = await Order.findById(order._id).lean();
+      if (paymentStatus === 'paid' && !paymentAlreadySettled) {
+        await createNotification(String(order.customer_id), 'payment_success', 'Payment confirmed', `Payment received for order ${order.tracking_code || order.id}.`);
+        if (order.status === 'confirmed') {
+          await autoDispatch(String(order._id));
+        }
+      } else if (paymentStatus === 'failed') {
+        await createNotification(String(order.customer_id), 'payment_failed', 'Payment failed', `Payment could not be completed for order ${order.tracking_code || order.id}.`);
+      }
+
+      if (refreshed) {
+        emitOrderUpdate(normalizeDoc(refreshed));
+      }
+
+      const returnUrl = String(req.body?.return_url || req.query?.return_url || `${APP_BASE_URL}/orders/${order._id}`);
+      if ((req.headers.accept || '').includes('text/html')) {
+        return res.redirect(returnUrl);
+      }
+
+      return res.json({
+        success: true,
+        tx_ref: txRef,
+        status: paymentStatus,
+        order: refreshed ? normalizeDoc(refreshed) : null,
+      });
     } catch (error) {
-      res.status(500).json({ error: 'Payment processing failed' });
+      console.error('Chapa callback error:', error);
+      res.status(500).json({ error: 'Failed to process Chapa callback.' });
     }
   });
 
