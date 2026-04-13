@@ -1,6 +1,7 @@
 export type ApiError = { error: string };
 
 export const apiFetch = async (path: string, options: RequestInit = {}) => {
+  const baseURL = import.meta.env.VITE_API_URL || "";
   const token = localStorage.getItem('token');
   const headers = new Headers(options.headers || {});
   if (token) headers.set('Authorization', `Bearer ${token}`);
@@ -8,7 +9,7 @@ export const apiFetch = async (path: string, options: RequestInit = {}) => {
     headers.set('Content-Type', 'application/json');
   }
 
-  const res = await fetch(path, { ...options, headers });
+  const res = await fetch(baseURL + path, { ...options, headers });
   const text = await res.text();
   let data: any = null;
   if (text) {
