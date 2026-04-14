@@ -1,5 +1,6 @@
 import './lib/loadEnv.js';
 import express from 'express';
+import cors from 'cors';
 import { createServer as createViteServer } from 'vite';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
@@ -10,6 +11,7 @@ import { fileURLToPath } from 'url';
 import mongoose from 'mongoose';
 import crypto from 'crypto';
 import { connectMongo } from './lib/mongo.js';
+import cors from 'cors';
 import {
   User,
   Driver,
@@ -353,6 +355,12 @@ const getChapaPaymentStatus = (verification: any, fallbackStatus?: string) => {
 
 async function startServer() {
   const app = express();
+  app.use(cors({
+    origin: 'https://zemenexpress.vercel.app',
+    credentials: true,
+  }));
+  app.use(express.json());
+  app.use(express.urlencoded({ extended: true }));
   const PORT = 3000;
   const httpServer = createServer(app);
   const io = new Server(httpServer, {
@@ -496,8 +504,6 @@ async function startServer() {
     });
   });
 
-  app.use(express.json());
-  app.use(express.urlencoded({ extended: true }));
   app.use((req, res, next) => {
     const started = Date.now();
     res.on('finish', () => {
